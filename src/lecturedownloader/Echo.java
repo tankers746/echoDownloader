@@ -6,22 +6,24 @@
 package lecturedownloader;
 
 import java.io.Serializable;
+import java.util.Date;
 
 /**
  *
  * @author Tom
  */
-public class Echo implements Serializable {
+public class Echo implements Serializable, Comparable<Echo> {
     
     String unit;
-    String date;
+    Date date;
     String url;
     String venue;
     String thumbnail;
     int week;
     long fileSize;
+    long duration;
     
-    Echo(String u, String d, String download, String v, String t, int w, long size) {
+    Echo(String u, Date d, String download, String v, String t, int w, long size, long dur) {
         unit = u;
         date = d;
         url = download;
@@ -29,10 +31,15 @@ public class Echo implements Serializable {
         thumbnail = t;
         week = w;
         fileSize = size;
+        duration = dur;
     }
+
+    public int compareTo(Echo other) {
+        return this.date.compareTo(other.date);
+}    
     
     Echo() {
-        this(null, null, null, null, null, 0, 0);
+        this(null, null, null, null, null, 0, 0, 0);
     }
     
 }

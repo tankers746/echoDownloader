@@ -19,10 +19,15 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -57,40 +62,43 @@ private static final int YEAR = 2016;
 private static final int TIMEOUT = 20;
 static WebDriver driver;
 static WebDriverWait wait;
-HashMap<String, Unit> units;
+HashMap<Integer, ArrayList<Echo>> sections;
+HashMap<String, int[]> units;
 
     LectureDownloader() throws Exception {
+        
+        //load the sections hashMap (this contains all of the units and the sections, this needs updating every year)
         units = new HashMap<>();
-        units = (HashMap<String, Unit>) getObject("units.ser");
+        units = (HashMap<String, int[]>) getObject("units.ser");
         if (units == null){ //checks if there is a saved table
             units = new HashMap<>();
             saveObject("units.ser", units);
+        }  
+        
+        //load all of the echoes
+        sections = new HashMap<>();
+        sections = (HashMap<Integer, ArrayList<Echo>>) getObject("sections.ser");
+        if (sections == null){ //checks if there is a saved table
+            sections = new HashMap<>();
+            saveObject("sections.ser", units);
         }        
+        
+            
         
         //getUnits();
         //printUnits();
         
         
-        String course = "CITS3001";
-        fetchLectures(units.get(course).years.get(2016).semester1);
-        for(int i = 0; i < units.get(course).years.get(2016).semester1.echoes.size(); i++) {
-            Echo lecture = units.get(course).years.get(2016).semester1.echoes.get(i);
+        String course = "MATH1001";
+        int section = units.get(course)[0];
+        //fetchLectures(section, false);
+        Collections.sort(sections.get(section), Collections.reverseOrder());
+        for(int i = 0; i < sections.get(section).size(); i++) {
+            Echo lecture = sections.get(section).get(i);
 
             
-            /*
-            if(lecture[0].equals(lectures.get(i+1)[0])) {
-                if(Long.parseLong(lecture[2]) < Long.parseLong(lectures.get(i+1)[2])) {
-                    lecture = lectures.get(i+1);  
-                }
-                i++;
-            }
-            */
-            //File f = new File(course + " - " + lecture[0] + ".m4v");
-            //URL u = new URL(lecture[1]);
-            //FileUtils.copyURLToFile(u, f);
-            
-            System.out.println(lecture.date + " - " + lecture.fileSize + " bytes - " + lecture.venue + " - " + lecture.thumbnail);
-       }
+            System.out.println(lecture.date.toString() + " - " + lecture.fileSize + " bytes - " + lecture.venue + " - " + lecture.thumbnail);
+       } 
 
         
         
@@ -106,7 +114,7 @@ HashMap<String, Unit> units;
     		fos.close();
     	} catch(Exception e){
                 e.printStackTrace();
-    		System.err.println("Error saving hash map");
+    		System.err.println("Error saving " + filename);
     	}
     }
     
@@ -120,7 +128,7 @@ HashMap<String, Unit> units;
     		fis.close();
     	} catch(Exception e){
                 //e.printStackTrace();
-    		System.err.println("Error reading hash table");
+    		System.err.println("Error reading " + filename);
     	}
     	return obj;
     }        
@@ -137,28 +145,32 @@ HashMap<String, Unit> units;
         wait = new WebDriverWait(driver, TIMEOUT);
     }
     
+    /*
     public void printUnits() {
-        for (String unit : units.keySet()) {
-           Unit u = units.get(unit);
-           System.out.println("Semester 1: " + u.years.get(2016).semester1.sectionID + " Semester 2: " + u.years.get(2016).semester2.sectionID); 
-           /* 
-           Unit u = new Unit(unit);
-           u.years.put(2016, new Year(2016));
-           u.years.get(2016).semester1.sectionID = unitsOld.get(unit)[0];
-           u.years.get(2016).semester2.sectionID = unitsOld.get(unit)[1];
-           units.put(unit, u);          
-           System.out.println("Semester 1: " + u.years.get(2016).semester1.sectionID + " Semester 2: " + u.years.get(2016).semester2.sectionID); 
-            */
+        for (String unit : unitsOld.keySet()) {
+           //Unit u = units.get(unit);
+           //System.out.println("Semester 1: " + u.years.get(2016).semester1.sectionID + " Semester 2: " + u.years.get(2016).semester2.sectionID); 
+           int[] s = new int[2];
+           s[0] = unitsOld.get(unit)[0];
+           s[1] = unitsOld.get(unit)[1];
+           sections.put(unit, s);          
+           System.out.println("Semester 1: " + s[0] + " Semester 2: " + s[1]); 
+           
         }
-        //saveObject("units.ser", units);
-    }
+        saveObject("sections.ser", sections);
+    }*/
     
-    public void fetchLectures(Semester sem) throws Exception {
-        startDriver(); 
+    public void fetchLectures(int sectionID, boolean repeats) throws Exception {
+
+        //check if there are currently fetched echoes for that section
+        if(!sections.containsKey(sectionID)) {
+            sections.put(sectionID, new ArrayList<Echo>());
+        }
 
         int amount = 999;
         //Load the page to create a session so we can use the API & get the api section id
-        driver.get("http://prod.lcs.uwa.edu.au:8080/ess/portal/section/"+sem.sectionID);  
+        startDriver();         
+        driver.get("http://prod.lcs.uwa.edu.au:8080/ess/portal/section/"+sectionID);  
         WebElement iframe = driver.findElements(By.tagName("iframe")).get(0);
         String apiSectionID = iframe.getAttribute("src").split("/section/")[1].split("\\?api")[0];
 
@@ -171,7 +183,8 @@ HashMap<String, Unit> units;
         
         //work out how many new lectures we need to fetch
         int totalEchoes = section.getJSONObject("presentations").getInt("totalResults");
-        int newEchoes = totalEchoes - sem.echoes.size();
+        int newEchoes = totalEchoes - sections.get(sectionID).size();
+        int fetched = 0;
         
         
         
@@ -183,6 +196,10 @@ HashMap<String, Unit> units;
         {
             Echo e = new Echo();
             
+            String title = presentations.getJSONObject(i).getString("title").toLowerCase();
+            //Skip repeat lectures they are silly
+            if(title.contains("repeat") && repeats == false) continue;
+
             //find a low thumbnail            
             JSONArray thumbnails = presentations.getJSONObject(i).getJSONArray("thumbnails");
             int k;
@@ -193,7 +210,11 @@ HashMap<String, Unit> units;
             String echoContent = thumbnail.split("synopsis")[0];
             e.url = echoContent + "audio-vga.m4v";
             e.week = presentations.getJSONObject(i).getInt("week");
-            e.date = presentations.getJSONObject(i).getString("startTime");            
+            e.duration = presentations.getJSONObject(i).getLong("durationMS");
+            String startTime = presentations.getJSONObject(i).getString("startTime");
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");
+            e.date = sdf.parse(startTime);
+            
             //make a new thread for downloading thumbnails
             Thread thread1 = new Thread () {
                 public void run () {
@@ -249,11 +270,12 @@ HashMap<String, Unit> units;
             thread1.join();
             thread2.join();
             
-            sem.echoes.add(e);
+            sections.get(sectionID).add(e);
+            fetched++;
         }
-        saveObject("units.ser", units);
+        saveObject("sections.ser", sections);
         driver.quit();
-        System.out.println("Fetched " + newEchoes + " new lectures.");
+        System.out.println("Fetched " + fetched + " new lectures.");
         //return echoList;
     }    
     
@@ -290,16 +312,16 @@ HashMap<String, Unit> units;
                     semester = 1;
                 }                                
                 String unit = course.getText().substring(course.getText().length()-9,course.getText().length()-1);
-                if(units.containsKey(unit)) {
-                    int[] sectionIDs = units.get(unit);
+                if(sections.containsKey(unit)) {
+                    int[] sectionIDs = sections.get(unit);
                     sectionIDs[semester] = sectionID;
-                    units.put(unit, sectionIDs);
+                    sections.put(unit, sectionIDs);
                 } else {
                     int[] sectionIDs = new int[2];
                     sectionIDs[semester] = sectionID;
-                    units.put(unit, sectionIDs);   
+                    sections.put(unit, sectionIDs);   
                 }
-                saveHashTable();                
+                saveObject("sections.ser", sections);                
             }
         }
         driver.quit();
