@@ -45,12 +45,25 @@ public class LectureDownloader {
 
 private static final int YEAR = 2016;
 
+HashMap<String, Object> data;
 HashMap<Integer, ArrayList<Echo>> sections;
 HashMap<String, int[]> units;
 ArrayList<String> venues;
 String echoBase = "http://prod.lcs.uwa.edu.au:8080";
+String downloads;
 
     LectureDownloader() throws Exception {
+        
+        //load the data hashMap, this contains all of the data
+        data = (HashMap<String, Object>) getObject("data.ser");
+        if (data == null){ //checks if there is a saved table
+            data = new HashMap<>();
+            data.put("sections", new HashMap<>());
+            data.put("venues", new HashMap<>());
+            data.put("echoBase", "");
+            data.put("downloads", "");
+            saveObject("data.ser", units);
+        }  
         
         //load the sections hashMap (this contains all of the units and the sections, this needs updating every year)
         units = (HashMap<String, int[]>) getObject("units.ser");
@@ -58,21 +71,9 @@ String echoBase = "http://prod.lcs.uwa.edu.au:8080";
             units = new HashMap<>();
             saveObject("units.ser", units);
         }  
-        
-        //load all of the echoes
-        sections = (HashMap<Integer, ArrayList<Echo>>) getObject("sections.ser");
-        if (sections == null){ //checks if there is a saved table
-            sections = new HashMap<>();
-            saveObject("sections.ser", units);
-        }   
-        
-        //load all of the venues
-        venues = (ArrayList<String>) getObject("venues.ser");
-        if (venues == null){ //checks if there is a saved table
-            venues = new ArrayList<>();
-            saveObject("venues.ser", units);
-        }         
-        
+                
+        sections = (HashMap<Integer, ArrayList<Echo>>) data.get("sections");
+        venues = (HashMap<Integer, ArrayList<Echo>>) data.get("sections");
             
         
         //getUnits();
