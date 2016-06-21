@@ -3,11 +3,12 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-package lecturedownloader;
-
 import com.gargoylesoftware.htmlunit.NicelyResynchronizingAjaxController;
 import com.gargoylesoftware.htmlunit.UnexpectedPage;
 import com.gargoylesoftware.htmlunit.WebClient;
+import com.gargoylesoftware.htmlunit.html.DomElement;
+import com.gargoylesoftware.htmlunit.html.DomNode;
+import com.gargoylesoftware.htmlunit.html.DomNodeList;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import java.io.File;
 import java.io.FileInputStream;
@@ -27,6 +28,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamReader;
 import org.apache.commons.io.FileUtils;
@@ -73,7 +76,7 @@ ArrayList<String> venues;
         
         //getUnits();
         //printUnits();
-        
+        /*
         
         String course = "ENSC1002";
         int section = units.get(course)[0];
@@ -87,7 +90,8 @@ ArrayList<String> venues;
             System.out.println(lecture.title + " - " + lecture.date.toString() + " - " + lecture.fileSize + " bytes - " + lecture.venue + " - " + lecture.thumbnail);
         }
         for(String venue : venues) System.out.println(venue);
-        
+        */
+        addUnit(177044);
     }
 
 
@@ -140,10 +144,11 @@ ArrayList<String> venues;
             Set<Integer> keys = sections.keySet();
             sectionIDs = keys.toArray(new Integer[keys.size()]);
         }
+        
         for(int sectionID : sectionIDs) {
             ArrayList<Echo> echoes = sections.get(sectionID);
-            if(echoes == null) continue;
             for(Echo e : echoes) {
+                
                 if(venues != null && !Arrays.asList(venues).contains(e.venue)) {
                     continue;
                 }
@@ -158,6 +163,44 @@ ArrayList<String> venues;
         }
         Collections.sort(filteredEchoes, Collections.reverseOrder());
         return filteredEchoes;
+    }
+    
+    public void addUnit(int sectionID) throws Exception {
+        long t = System.currentTimeMillis();  
+        WebClient webClient = new WebClient();     
+        HtmlPage page = webClient.getPage("http://prod.lcs.uwa.edu.au:8080/ess/portal/section/"+sectionID);
+        DomNodeList<DomElement> errors = page.getElementsByTagName("h1");
+        if(errors.size() > 0 && errors.get(0).asText().equals("Missing course module")) {
+            System.err.println("Section does not exist.");
+            return;
+        }
+        
+        HtmlPage iframe = (HtmlPage) page.getFrames().get(0).getEnclosedPage();
+        DomElement course = null;
+        while(course == null) {
+            synchronized (iframe) {
+                iframe.wait(500); //wait
+            }
+            course = iframe.getElementById("course-info");
+        }
+        int semester = 0;
+        if(course.asText().toLowerCase().contains("semester 1")) {
+            semester = 0;
+        } else if(course.asText().toLowerCase().contains("semester 2")) {
+            semester = 1;
+        }                                
+        String unit = course.asText().substring(course.asText().length()-9,course.asText().length()-1);
+        if(units.containsKey(unit)) {
+            units.get(unit)[semester] = sectionID;
+        } else {
+            int[] sectionIDs = new int[2];
+            sectionIDs[semester] = sectionID;
+            units.put(unit, sectionIDs);   
+        }
+        System.out.println(unit + " " + semester);
+        webClient.close();
+        saveObject("units.ser", units);        
+        System.out.println("Fetching unit took " + (System.currentTimeMillis() - t) + " ms"); 
     }
     
     public void fetchEchoes(int sectionID, boolean repeats) throws Exception {
