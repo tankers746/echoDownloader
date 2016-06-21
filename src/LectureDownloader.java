@@ -48,6 +48,7 @@ private static final int YEAR = 2016;
 HashMap<Integer, ArrayList<Echo>> sections;
 HashMap<String, int[]> units;
 ArrayList<String> venues;
+String echoBase = "http://prod.lcs.uwa.edu.au:8080";
 
     LectureDownloader() throws Exception {
         
@@ -91,7 +92,6 @@ ArrayList<String> venues;
         }
         for(String venue : venues) System.out.println(venue);
         */
-        addUnit(177044);
     }
 
 
@@ -102,7 +102,7 @@ ArrayList<String> venues;
     		oos.writeObject(h);
     		oos.close();
     		fos.close();
-    	} catch(Exception e){
+    	} catch(IOException e){
     		System.err.println("Error saving " + filename);
     	}
     }
@@ -168,28 +168,30 @@ ArrayList<String> venues;
     public void addUnit(int sectionID) throws Exception {
         long t = System.currentTimeMillis();  
         WebClient webClient = new WebClient();     
-        HtmlPage page = webClient.getPage("http://prod.lcs.uwa.edu.au:8080/ess/portal/section/"+sectionID);
-        DomNodeList<DomElement> errors = page.getElementsByTagName("h1");
-        if(errors.size() > 0 && errors.get(0).asText().equals("Missing course module")) {
+        webClient.getOptions().setJavaScriptEnabled(false);
+        HtmlPage page = webClient.getPage(echoBase + "/ess/portal/section/"+sectionID);
+        UnexpectedPage json = null; 
+        try {
+            String apiSectionID = page.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0];
+            json = webClient.getPage(echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=1");
+        } catch (Exception e) {
             System.err.println("Section does not exist.");
             return;
         }
+        //parse json data from the echo api
+        JSONObject obj = new JSONObject(json.getWebResponse().getContentAsString());
+        JSONObject section = obj.getJSONObject("section");
+        String unit = section.getJSONObject("course").getString("identifier");
+        String name = section.getString("name").toLowerCase();
+        webClient.close();
         
-        HtmlPage iframe = (HtmlPage) page.getFrames().get(0).getEnclosedPage();
-        DomElement course = null;
-        while(course == null) {
-            synchronized (iframe) {
-                iframe.wait(500); //wait
-            }
-            course = iframe.getElementById("course-info");
-        }
         int semester = 0;
-        if(course.asText().toLowerCase().contains("semester 1")) {
+        if(name.contains("semester 1")) {
             semester = 0;
-        } else if(course.asText().toLowerCase().contains("semester 2")) {
+        } else if(name.contains("semester 2")) {
             semester = 1;
         }                                
-        String unit = course.asText().substring(course.asText().length()-9,course.asText().length()-1);
+
         if(units.containsKey(unit)) {
             units.get(unit)[semester] = sectionID;
         } else {
@@ -198,7 +200,6 @@ ArrayList<String> venues;
             units.put(unit, sectionIDs);   
         }
         System.out.println(unit + " " + semester);
-        webClient.close();
         saveObject("units.ser", units);        
         System.out.println("Fetching unit took " + (System.currentTimeMillis() - t) + " ms"); 
     }
@@ -211,9 +212,9 @@ ArrayList<String> venues;
         WebClient webClient = new WebClient();
         webClient.getOptions().setJavaScriptEnabled(false);
 
-        HtmlPage page = webClient.getPage("http://prod.lcs.uwa.edu.au:8080/ess/portal/section/"+sectionID);
+        HtmlPage page = webClient.getPage(echoBase + "/ess/portal/section/"+sectionID);
         String apiSectionID = page.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0];
-        UnexpectedPage json = webClient.getPage("http://prod.lcs.uwa.edu.au:8080/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
+        UnexpectedPage json = webClient.getPage(echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
         
         //parse json data from the echo api
         JSONObject obj = new JSONObject(json.getWebResponse().getContentAsString());
@@ -321,9 +322,11 @@ ArrayList<String> venues;
         //load the server so we can grab the filesizes
         HtmlPage media = null;
         try {
-            media = webClient.getPage("http://media.lcs.uwa.edu.au/echocontent");
-        } catch (IOException ex) {
+            String echoContent = echoes.get(0).url.split("echocontent")[0] + "echocontent";
+            media = webClient.getPage(echoContent);
+        } catch (Exception ex) {
             Logger.getLogger(LectureDownloader.class.getName()).log(Level.SEVERE, null, ex);
+            return;
         }
         //iterate over all the newly fetched echoes        
         for (int k = startIndex; k < finishIndex; k++) {
