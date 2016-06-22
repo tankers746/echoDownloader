@@ -65,7 +65,7 @@ public class LectureDownloader {
     public void downloadEcho(Echo e) {
         File f = new File(d.downloads + "/" + e.unit + "/" + e.name + ".m4v");
         try {
-            System.out.println("Downloading...");
+            System.out.println("Downloading lecture...");
             FileUtils.copyURLToFile(new URL(e.url), f);
             System.out.println("Downloaded '" + f.getName() + "' to " + f.getParent());
             e.downloaded = true;
@@ -76,7 +76,9 @@ public class LectureDownloader {
     }
 
     public void downloadEchoes(List<Echo> echoes) {
+        int queue = echoes.size();
         for (Echo e : echoes) {
+            System.out.println(queue + " lectures in the download queue.");
             downloadEcho(e);
         }
     }
@@ -84,6 +86,7 @@ public class LectureDownloader {
     public ArrayList<Echo> fetchFiltered(Filter f) {
         ArrayList<Echo> fetched = new ArrayList<>();
         for (int sectionID : f.sectionIDs) {
+            
             fetched.addAll(fetchEchoes(sectionID));
         }
         return f.filterEchoList(fetched);
@@ -116,6 +119,7 @@ public class LectureDownloader {
     }
 
     public void addUnit(int sectionID) {
+        System.out.println("Fetching unit...");
         long t = System.currentTimeMillis();
         WebClient webClient = new WebClient();
         webClient.getOptions().setJavaScriptEnabled(false);
@@ -153,8 +157,20 @@ public class LectureDownloader {
         saveObject("units.ser", units);
         System.out.println("Fetching unit took " + (System.currentTimeMillis() - t) + " ms");
     }
+    
+    public void setAllEchoesDownloaded(HashMap<Integer, ArrayList<Echo>> s) {
+        for(int key : s.keySet()) {
+            ArrayList<Echo> echoes = s.get(key);
+            for(Echo e : echoes) {
+                e.downloaded = true;
+            }
+        }
+        saveObject("data.ser", d);        
+        System.out.println("All lectures have been set to [Downloaded]"); 
+    }
 
     public List<Echo> fetchEchoes(int sectionID) {
+        System.out.println("Fetching lectures...");
         ArrayList<Echo> echoes = d.sections.get(sectionID);
         //check if there are currently fetched echoes for that section
         if (echoes == null) {
@@ -187,7 +203,7 @@ public class LectureDownloader {
 
         if (newEchoes == 0) {
             System.out.println("No new lectures to fetch.");
-            return null;
+            return new ArrayList<>();
         }
 
         //fetch the new lectures
@@ -214,7 +230,7 @@ public class LectureDownloader {
             String rep = "";
             if (title.toLowerCase().contains("repeat")) {
                 e.repeat = true;
-                rep = "[R]";
+                rep = " [R]";
             }
             try {
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");                
@@ -222,7 +238,7 @@ public class LectureDownloader {
             } catch (ParseException ex) {
                 System.err.println("Error parsing date from API."); 
             }
-            e.name = String.format("%s - [%tm-%td] [L%s] %s", e.unit, e.date, e.date, lectureNumber, rep);
+            e.name = String.format("%s - [%tm-%td] [L%s]%s", e.unit, e.date, e.date, lectureNumber, rep);
 
             d.sections.get(sectionID).add(e);
         }
@@ -270,7 +286,7 @@ public class LectureDownloader {
 
 
         saveObject("data.ser", d);
-        System.out.println("Fetched " + newEchoes + " new lectures.");
+        System.out.println("Fetched " + newEchoes + " new " + unit + " lectures.\n");
         return echoes.subList(echoes.size() - newEchoes, echoes.size());
     }
 
@@ -337,6 +353,8 @@ public class LectureDownloader {
                     streamReader.next();
                 }
                 e.venue = streamReader.getElementText();
+                //add the venue code to the name so we don't end up with duplicate filenames
+                e.name = e.name + " " + "[" + e.venue.split("\\[")[1];
                 if (!d.venues.contains(e.venue)) {
                     d.venues.add(e.venue);
                 }
@@ -354,8 +372,8 @@ public class LectureDownloader {
             if (e.downloaded) {
                 downloaded = " [Downloaded]";
             }
-            System.out.println(e.name + downloaded);
-        }        
+            System.out.println(e.name + " " + e.venue + downloaded);
+        }
     }
 
     private static void disableLogs() {

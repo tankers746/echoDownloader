@@ -54,15 +54,16 @@ public class Filter {
         this();
         String[] unitCodes = new String[0];
         int semester = 0;
-        try {
-            FileReader reader = new FileReader(path);
+        try (FileReader reader = new FileReader(path)) {
             BufferedReader bufferedReader = new BufferedReader(reader);   
             SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");              
             
             String line;            
             while ((line = bufferedReader.readLine()) != null) {
+                line = line.toLowerCase().replaceAll("\\s","");
                 String[] lineData = line.split("=");
-                switch(lineData[0]) {
+                if(lineData.length < 2) continue;
+                switch(lineData[0].toLowerCase()) {
                     case "semester" :
                         if(lineData[1].equals("1") || lineData[1].equals("2")); semester = Integer.parseInt(lineData[1])-1;
                         break;
@@ -70,7 +71,9 @@ public class Filter {
                         if(lineData[1] != null) unitCodes = lineData[1].split(",");                        
                         break;
                     case "venues" :
-                        if(lineData[1] != null) venues = Arrays.asList(lineData[1].split(","));
+                        if(lineData[1] != null) {
+                            venues = Arrays.asList(lineData[1].split(","));
+                        }
                         break;
                     case "repeats" :
                         repeats = parseBoolean(lineData[1]);
@@ -94,12 +97,13 @@ public class Filter {
                         break;                                     
                 }
             }
-            reader.close();
         } catch (IOException e) {
-            System.err.println("Error reading file.");
+            System.err.println("Error reading file. " + e.getMessage());
         }
-        for(String unit : unitCodes) { 
-            if(units.containsKey(unit)) sectionIDs.add(units.get(unit)[semester]); 
+        for(String unit : unitCodes) {            
+            if(units.containsKey(unit.toUpperCase())) {
+                sectionIDs.add(units.get(unit.toUpperCase())[semester]);
+            } 
         }
     }    
     
@@ -112,7 +116,7 @@ public class Filter {
     
     private boolean containsVenue(String echoVenue, List<String> filterVenues) {
         for(String searchVenue : filterVenues) {
-            if(echoVenue.contains(searchVenue)) return true;
+            if(echoVenue.toLowerCase().contains(searchVenue)) return true;
         }
         return false;
     }    
