@@ -14,27 +14,29 @@ import java.util.Date;
 public class Echo implements Serializable, Comparable<Echo> {
     
     String unit;
-    String title;    
+    String name;    
     String url;
     String venue;
     String thumbnail;
     Date date;
-    int week;
+    int sectionID;
     long fileSize;
     long duration;
     Boolean downloaded;
+    Boolean repeat;
     
-    Echo(String u, String name, String download, String v, String t, Date d, int w, long size, long dur, Boolean dl) {
+    Echo(String u, String title, String download, String v, String t, Date d, int sID, long size, long dur, Boolean dl, Boolean r) {
         unit = u;
-        title = name;
+        name = title;
         url = download;
         venue = v;
         thumbnail = t;
         date = d;        
-        week = w;
+        sectionID = sID;
         fileSize = size;
         duration = dur;
         downloaded = dl;
+        repeat = r;
     }
 
     public int compareTo(Echo other) {
@@ -42,7 +44,7 @@ public class Echo implements Serializable, Comparable<Echo> {
 }    
     
     Echo() {
-        this(null, null, null, null, null, null, 0, 0, 0, false);
+        this(null, null, null, null, null, null, 0, 0, 0, false, false);
     }
     
 }
