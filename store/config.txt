@@ -1,0 +1,7 @@
+echoBase=http://prod.lcs.uwa.edu.au:8080/
+downloadsfolder="C:\users\tom\desktop\lectures"
+after=1/6/2016
+units=math1002
+venues=
+repeats=false
+downloaded=uwot

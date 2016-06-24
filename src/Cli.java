@@ -1,10 +1,6 @@
 
-import java.io.File;
 import java.util.ArrayList;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
-import org.apache.commons.cli.BasicParser;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.GnuParser;
@@ -14,7 +10,6 @@ import org.apache.commons.cli.ParseException;
 
 public class Cli {
 
-    private static final Logger log = Logger.getLogger(Cli.class.getName());
     private String[] args = null;
     private Options options = new Options();
 
@@ -29,7 +24,7 @@ public class Cli {
 
         options.addOption("h", "help", false, "Show help.");
         options.addOption("f", "fetch", false, "Fetch new lectures, must be combined with a filter");
-        options.addOption("c", "config", true, "Specifies the filter config file");
+        options.addOption("c", "config", true, "Specifies the config file with the filters");
         options.addOption("d", "download", false, "Download lectures, must be combined with a filter, downloades new lectures when combined with fetch");
         options.addOption("a", "add", true, "Add a unit by specifying section number");
         options.addOption("s", "set", false, "Sets all of the fetched lectures to downloaded");
@@ -45,9 +40,8 @@ public class Cli {
         boolean fetch = false;
         boolean download = false;
         boolean list = false;
-        LectureDownloader ld = new LectureDownloader();  
-        ld.setEchoBase("http://prod.lcs.uwa.edu.au:8080");
-        ld.setDownloads("C:/users/tom/desktop/lectures");         
+        boolean add = false;
+        echoDownloader ld = new echoDownloader();        
         
         try {
             cmd = parser.parse(options, args);
@@ -66,8 +60,8 @@ public class Cli {
             }             
             if (cmd.hasOption("a")) {
                 try {
-                    sectionID = Integer.parseInt(cmd.getOptionValue("a"));
-                    if(sectionID > 0) ld.addUnit(sectionID);                
+                    sectionID = Integer.parseInt(cmd.getOptionValue("a"));   
+                    add = true;
                 } catch(Exception e) {
                     System.err.println("Please enter a number for the section number.");
                     return;
@@ -84,21 +78,42 @@ public class Cli {
             System.err.println(e.getMessage());
             help();
         }
-        Filter f = new Filter();
-        ArrayList<Echo> echoList = f.filterEchoMap(ld.d.sections);
-        if(filterFile != null) {
-            f = new Filter(filterFile, ld.units);
-            echoList = f.filterEchoMap(ld.d.sections);
+        Config c = new Config();
+        ArrayList<Echo> echoList;
+        
+        if(filterFile == null) {
+            System.out.println("Please specify a config file.");
+            return;
+        } else {
+            try {
+                c = new Config(filterFile, ld);
+                if(ld.d.echoBase.isEmpty() || ld.d.downloads.isEmpty()) {
+                    System.err.println("Please specify echoBase and downloadsFolder in the config file.");
+                    return;
+                }                  
+            } catch (Exception ex) {
+                System.err.println("Failed to read config file check that the path is correct.");
+                return;
+            }          
+            if(add) {
+                if(sectionID > 0) ld.addUnit(sectionID);                     
+                return;
+            }
+            echoList = c.filterEchoMap(ld.d.sections);
             if(fetch) {
-                echoList = ld.fetchFiltered(f);
+                echoList = ld.fetchFiltered(c);
             }
             if(download) {
                 ld.downloadEchoes(echoList);
             }
-            echoList = f.filterEchoMap(ld.d.sections);
         }
-        else if(download || fetch) System.out.println("Please specify a filter config file.");
-        if(list) ld.printLectures(echoList);
+
+        if(list) {
+            echoList = c.filterEchoMap(ld.d.sections);            
+            if(echoList.isEmpty()) {
+                System.out.println("No lectures found matching the filter.");            
+            } else ld.printLectures(echoList);
+        }
     }
 
     private void help() {
