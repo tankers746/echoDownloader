@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -24,27 +25,27 @@ import java.util.List;
  * @author Tom
  */
 public class Config {
-    List<Integer> sectionIDs;
-    List<String> venues;
+    List<String> courseIDs;
+    List<String> excludeVenues;
     Boolean downloaded;
     Boolean repeats;
     Date before;
     Date after;
     
     Config() {
-        sectionIDs = new ArrayList<>();
-        venues = new ArrayList<>();
+        courseIDs = new ArrayList<>();
+        excludeVenues = new ArrayList<>();
         downloaded = null;
         repeats = null;
         before = null;
         after = null;
         
-    }      
+    }
     
-    Config(List sections, List vns, Boolean dld, Boolean rpt, Date bf, Date af) {
+    Config(List courses, List vns, Boolean dld, Boolean rpt, Date bf, Date af) {
         this();
-        if(sections != null) sectionIDs = sections;
-        if(vns != null) venues = vns;
+        if(courses != null) courseIDs = courses;
+        if(vns != null) excludeVenues = vns;
         downloaded = dld;
         repeats = rpt;
         before = bf;
@@ -52,91 +53,85 @@ public class Config {
         
     }
     
-    Config(String path, echoDownloader ld) throws FileNotFoundException, IOException {
+    Config(Data d, HashMap<String, String> units, String path) {
         this();
-        String[] unitCodes = new String[0];
-        int semester = 0;
-        FileReader reader = new FileReader(path);
-        BufferedReader bufferedReader = new BufferedReader(reader);               
+        List<String> excludeUnits = new ArrayList<>();   
+        
+        if(path != null) {
+            try {
+                FileReader reader = new FileReader(path);
+                BufferedReader bufferedReader = new BufferedReader(reader);               
 
-        String line;            
-        while ((line = bufferedReader.readLine()) != null) {
-            line = line.toLowerCase().replaceAll("\\s","");
-            String[] lineData = line.split("=");
-            if(lineData.length < 2) continue;
-            lineData[1] = lineData[1].replace("\"", "");
-            switch(lineData[0].toLowerCase()) {
-                case "semester" :
-                    if(lineData[1].equals("1") || lineData[1].equals("2")); semester = Integer.parseInt(lineData[1])-1;
-                    break;
-                case "units" :
-                    if(lineData[1] != null) unitCodes = lineData[1].split(",");                        
-                    break;
-                case "venues" :
-                    if(lineData[1] != null) {
-                        venues = Arrays.asList(lineData[1].split(","));
+                String line;            
+                while ((line = bufferedReader.readLine()) != null) {
+                    line = line.toLowerCase().trim();
+                    String[] lineData = line.split("=");
+                    if(lineData.length < 2) continue;
+                    lineData[1] = lineData[1].replace("\"", "").trim();
+                    switch(lineData[0].toLowerCase()) {
+                        case "excludeunits" :
+                            if(lineData[1] != null) {
+                                excludeUnits = Arrays.asList(lineData[1].toUpperCase().split("\\s*,\\s*"));
+                            }                        
+                            break;
+                        case "excludevenues" :
+                            if(lineData[1] != null) {
+                                excludeVenues = Arrays.asList(lineData[1].split("\\s*,\\s*"));
+                            }
+                            break;
+                        case "ffmpeg" :
+                            d.ffmpeg = lineData[1].split("\\.exe")[0];
+                            break; 
+                        case "before" :
+                            try {
+                                SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");  
+                                if(lineData[1] != null) before = sdf.parse(lineData[1]);
+                            } catch (ParseException ex) {
+                                System.err.println("Error parsing before.");
+                            }
+                            break;
+                        case "after" :
+                            try {
+                                SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy hh:mm");  
+                                if(lineData[1] != null) after = sdf.parse(lineData[1]+" 23:59");
+                            } catch (ParseException ex) {
+                                System.err.println("Error parsing after.");
+                            }
+                            break;
+                        case "echobase" :
+                            d.echoBase = lineData[1];
+                            break;  
+                        case "downloadsfolder" :
+                            d.downloads = null;
+                            //switch backslash to forward slash and remove quotations
+                            String dir = lineData[1].replace("\\", "/");
+                            File f = new File(dir);
+                            if(f.exists() && f.isDirectory()) {
+                                d.downloads = dir;
+                            } else System.err.println("Downloads folder not valid.");
+                            break;                      
                     }
-                    break;
-                case "repeats" :
-                    repeats = parseBoolean(lineData[1]);
-                    break;
-                case "downloaded" :
-                    downloaded = parseBoolean(lineData[1]);
-                    break;  
-                case "before" :
-                    try {
-                        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");  
-                        if(lineData[1] != null) before = sdf.parse(lineData[1]);
-                    } catch (ParseException ex) {
-                        System.err.println("Error parsing before.");
-                    }
-                    break;
-                case "after" :
-                    try {
-                        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy hh:mm");  
-                        if(lineData[1] != null) after = sdf.parse(lineData[1]+" 23:59");
-                    } catch (ParseException ex) {
-                        System.err.println("Error parsing after.");
-                    }
-                    break;
-                case "echobase" :
-                    ld.d.echoBase = lineData[1];
-                    break;  
-                case "downloadsfolder" :
-                    //switch backslash to forward slash and remove quotations
-                    String dir = lineData[1].replace("\\", "/");
-                    File f = new File(dir);
-                    if(f.exists() && f.isDirectory()) {
-                        ld.d.downloads = dir;
-                    } else System.err.println("Downloads folder not valid.");
-                    break;                      
+                }
+                bufferedReader.close();
+            } catch(IOException Ex) {
+                System.err.println("Failed to read config file check that the path is correct.");
             }
         }
-        for(String unit : unitCodes) {            
-            if(ld.units.containsKey(unit.toUpperCase())) {
-                sectionIDs.add(ld.units.get(unit.toUpperCase())[semester]);
-            } else {
-                System.out.println(unit + " (Semester " + semester+1 + ") is not in the list of fetchable units, add its section number using -a.");
-            } 
+        for(String unit : units.keySet()) {            
+            if(!excludeUnits.contains(unit.toUpperCase())) {
+                courseIDs.add(units.get(unit.toUpperCase()));
+            }
         }
-        bufferedReader.close();
     }    
-    
-    private Boolean parseBoolean(String s) {
-        if(s == null) return null;
-        if(s.toLowerCase().equals("true")) return true;
-        if(s.toLowerCase().equals("false")) return false;
-        return null;
-    }
     
     private boolean containsVenue(String echoVenue, List<String> filterVenues) {
         for(String searchVenue : filterVenues) {
-            if(echoVenue.toLowerCase().contains(searchVenue)) return true;
+            if(echoVenue.toLowerCase().contains(searchVenue.toLowerCase())) return true;
         }
         return false;
     }    
     
-    public ArrayList<Echo> filterEchoMap(HashMap<Integer, ArrayList<Echo>> sections) {
+    public ArrayList<Echo> filterEchoMap(HashMap<String, ArrayList<Echo>> sections) {
         ArrayList<Echo> filteredEchoes = new ArrayList<>();  
         sections.keySet().stream()
                 .forEach((k) -> filteredEchoes.addAll(filterEchoList(sections.get(k))));
@@ -144,12 +139,11 @@ public class Config {
         return filteredEchoes;
     }
     
-    public ArrayList<Echo> filterEchoList(List<Echo> echoes) {
+    public List<Echo> filterEchoList(List<Echo> echoes) {
         ArrayList<Echo> filteredEchoes = new ArrayList<>();  
         echoes.stream()
-                .filter((e) -> (sectionIDs.isEmpty() || sectionIDs.contains(e.sectionID)))
-                .filter((e) -> (venues.isEmpty() || containsVenue(e.venue, venues)))
-                .filter((e) -> (downloaded == null || downloaded.equals(e.downloaded)))
+                .filter((e) -> (courseIDs.isEmpty() || courseIDs.contains(e.courseID)))
+                .filter((e) -> (excludeVenues.isEmpty() || !containsVenue(e.venue, excludeVenues)))
                 .filter((e) -> (repeats == null || repeats.equals(e.repeat)))
                 .filter((e) -> (before == null || e.date.before(before)))
                 .filter((e) -> (after == null || e.date.after(after)))                        

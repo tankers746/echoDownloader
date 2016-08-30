@@ -3,10 +3,14 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
+import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
 import com.gargoylesoftware.htmlunit.NicelyResynchronizingAjaxController;
 import com.gargoylesoftware.htmlunit.UnexpectedPage;
 import com.gargoylesoftware.htmlunit.WebClient;
+import com.gargoylesoftware.htmlunit.html.DomElement;
+import com.gargoylesoftware.htmlunit.html.HtmlElement;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -15,19 +19,27 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamReader;
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.FilenameUtils;
 import org.json.*;
 
 /**
@@ -36,87 +48,160 @@ import org.json.*;
  */
 public class echoDownloader {
 
-    HashMap<String, int[]> units;
+    //units (name, courseID)
+    HashMap<String, String> units;
     Data d;
+    BlackboardConnector bc;
+    WebClient webClient;
 
-    echoDownloader() {
+    echoDownloader(WebClient wc, BlackboardConnector connector, Data dt, HashMap<String, String> unitData) {
+        
+        bc = connector;      
+        webClient = wc;
+        d = dt;
+        units = unitData;
 
-        d = (Data) getObject("data.ser");
-        if (d == null) { //checks if there is a saved table
-            d = new Data();
-            saveObject("data.ser", d);
+        if (units.isEmpty()) { //checks if there is a saved table
+            System.out.println("No units found.");
+            if(bc != null && webClient != null) {
+                loadUnits();
+                Data.saveObject("units.ser", units);
+
+                for(String unit : units.keySet()) {
+                    System.out.println("Found unit " + unit + " with course ID " + units.get(unit));
+                }
+            }
         }
-
-        //load the units hashMap (this contains all of the units and the sections, this needs updating every year)
-        units = (HashMap<String, int[]>) getObject("units.ser");
-        if (units == null) { //checks if there is a saved table
-            units = new HashMap<>();
-            saveObject("units.ser", units);
-        }
+        
     }
-
-    public void downloadEcho(Echo e) {
+    
+    public static void downloadEcho(Echo e, String downloads, String ffmpeg, boolean verbose) {
+        boolean failed = false;                
         String ext = ".m4v";
-        String filename = d.downloads + "/" + e.unit + "/" + e.name;
+        boolean audio = false;
+        boolean m3u8 = false;
+        
+        //Check if the file needs to be constructed from a m3u8 playlist
+        if(e.url.substring(e.url.length()-4, e.url.length()).equals("m3u8")) {    
+            ext = ".mp4";
+            m3u8 = true;
+        }
+        if(e.url.substring(e.url.length()-3, e.url.length()).equals("mp3")) {
+            ext = ".mp4";
+            audio = true;
+        }        
+        
+        String basePath = downloads + "/" + e.unit + "/";
+        String filename =  String.format("%s%s - S01E%02d - %s", basePath, e.unit, e.episode, e.name);
         File f = new File(filename + ext);
         int n = 1;
         while(f.exists()) {
-            f = new File(filename + " (" + n++ + ")" + ext);
+            filename = filename + " (" + n++ + ")";
+            f = new File(filename + ext);
         }
+        
+        System.out.println("Downloading '" + f.getName() + "'...");        
         try {
-            System.out.println("Downloading lecture...");
-            FileUtils.copyURLToFile(new URL(e.url), f);
-            System.out.println("Downloaded '" + f.getName() + "' to " + f.getParent());
-            e.downloaded = true;
-            saveObject("data.ser", d);
-        } catch (IOException ex) {
-            System.err.println("Failed to download " + f.getName());
+            List<String> args = new ArrayList<>();
+            args.add(ffmpeg);
+            args.add("-i");
+            args.add(e.url);
+            
+            if(audio) {
+                args.add("-f");
+                args.add("lavfi");                      
+                args.add("-i");
+                args.add("color=s=640x480:r=10");  
+                args.add("-c:v");
+                args.add("libx264");  
+                args.add("-c:a");
+                args.add("aac");                
+                args.add("-shortest");                 
+            } else {
+                args.add("-c");
+                args.add("copy");                
+            }
+            
+            args.add("-metadata");
+            args.add("show=" + e.unit + " - " + e.unitName);
+            
+            args.add("-metadata");
+            args.add("title=" + e.name);
+            
+            args.add("-metadata");
+            args.add("episode_id=" + e.episode);   
+            
+            if(m3u8) {               
+                args.add("-bsf:a");
+                args.add("aac_adtstoasc");   
+            }
+            
+            args.add(filename + ext);
+            
+            new File(basePath).mkdirs();
+            Process downloader = new ProcessBuilder(args).redirectErrorStream(true).start();
+            
+            int exitCode = -1;
+            try (BufferedReader processOutputReader = new BufferedReader(new InputStreamReader(downloader.getInputStream(), Charset.defaultCharset()));) {
+                String line;
+                while ((line = processOutputReader.readLine()) != null) {
+                    if(verbose) System.out.println(line);
+                }
+                exitCode = downloader.waitFor();
+            }
+            
+            if(exitCode == 0) {
+                System.out.println("Succesfully downloaded to '" + f.getParent() + "'");
+                e.downloaded = true;
+            } else failed = true;
+        } catch (IOException | InterruptedException ex) {
+            failed = true;  
+        }
+        
+        if(failed) {
+            f.delete();
+            System.out.println("Failed to download '" + f.getName() + "");            
         }
     }
 
-    public void downloadEchoes(List<Echo> echoes) {
+    public static void downloadEchoes(List<Echo> echoes, String downloads, String ffmpeg, boolean verbose) {
         int queue = echoes.size();
         for (Echo e : echoes) {
-            System.out.println(queue-- + " lectures in the download queue.");
-            downloadEcho(e);
+            System.out.println("\n" + queue-- + " lecture(s) in the download queue.");
+            downloadEcho(e, downloads, ffmpeg, verbose);
         }
     }
+    
+    public void loadUnits() {
+        try {
+            System.out.println("\nFetching units...");
+            long t = System.currentTimeMillis();
 
-    public ArrayList<Echo> fetchFiltered(Config f) {
-        ArrayList<Echo> fetched = new ArrayList<>();
-        for (int sectionID : f.sectionIDs) {
+            //Load the unit personalisation page to get list of units
+            String href = bc.BBHome.getElementById("module:_3_1").getElementsByTagName("a").get(0).getAttribute("href");
+            HtmlPage unitPage = webClient.getPage("https://" + bc.BBHome.getUrl().getHost() + "/" + href);
             
-            fetched.addAll(fetchEchoes(sectionID));
+            //Iterate over the table of units
+            Iterable<DomElement> rows = unitPage.getElementById("blockAttributes_table_jsListFULL_Student_23163_1_body").getChildElements();
+            for(DomElement row : rows) {
+                //iterate over all of the checkboxes to get the course id
+                List<HtmlElement> inputs = row.getElementsByTagName("input");
+                for(DomElement input : inputs) {
+                    String id = input.getAttribute("id");
+                    if(id.contains("course")) {
+                        //separate the courseID from the rest of the id, e.g. (id = "amc.showcourseid._12892_1")
+                        String title = input.getAttribute("title");
+                        units.put(title.substring(0,8) , id.split("\\.")[2]);
+                        break;
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
         }
-        return f.filterEchoList(fetched);
     }
-
-    public final void saveObject(String filename, Object h) {
-        try {
-            FileOutputStream fos = new FileOutputStream(filename);
-            ObjectOutputStream oos = new ObjectOutputStream(fos);
-            oos.writeObject(h);
-            oos.close();
-            fos.close();
-        } catch (IOException e) {
-            System.err.println("Error saving " + filename);
-        }
-    }
-
-    public final Object getObject(String filename) {
-        Object obj = null;
-        try {
-            FileInputStream fis = new FileInputStream(filename);
-            ObjectInputStream ois = new ObjectInputStream(fis);
-            obj = ois.readObject();
-            ois.close();
-            fis.close();
-        } catch (IOException | ClassNotFoundException e) {
-            System.err.println("Error reading " + filename);
-        }
-        return obj;
-    }
-
+    
+/*
     public void addUnit(int sectionID) {
         System.out.println("Fetching unit...");
         long t = System.currentTimeMillis();
@@ -156,76 +241,146 @@ public class echoDownloader {
         saveObject("units.ser", units);
         System.out.println("Fetching unit took " + (System.currentTimeMillis() - t) + " ms");
     }
+    */
     
-    public void setAllEchoesDownloaded(HashMap<Integer, ArrayList<Echo>> s) {
-        for(int key : s.keySet()) {
-            ArrayList<Echo> echoes = s.get(key);
-            for(Echo e : echoes) {
-                e.downloaded = true;
+    public static void setEchoesDownloaded(ArrayList<Echo> echoes, Boolean setValue) {
+        for(Echo e : echoes) {
+            e.downloaded = setValue;
+        }       
+        System.out.println("\nLectures matching filter have been set [Downloaded] = " + setValue); 
+    }
+    
+    private String getUnitName(String courseID) {
+        String unitName = "";
+        for(String unit : units.keySet()) {
+            if(units.get(unit).equals(courseID)) {
+                unitName = unit;
+                break;
             }
         }
-        saveObject("data.ser", d);        
-        System.out.println("All lectures have been set to [Downloaded]"); 
+        return unitName;
     }
+    
+    public void fetch(Config c) {
+        for (String courseID : c.courseIDs) {
+            List<Echo> fetched = fetchEchoes(courseID);    
+            String unit = getUnitName(courseID);
+            if (fetched.isEmpty()) {
+                System.out.println("No new " + unit + " lectures to fetch.");
+            } else {
+                System.out.println("Fetched " + fetched.size() + " new " + unit + " lectures.");                    
+            }
+            d.courses.get(courseID).addAll(fetched);
+        }
+    }    
 
-    public List<Echo> fetchEchoes(int sectionID) {
-        System.out.println("Fetching lectures...");
-        ArrayList<Echo> echoes = d.sections.get(sectionID);
+    public ArrayList<Echo> fetchEchoes(String courseID) {
+        System.out.println("\nFetching lectures...");
+        ArrayList<Echo> echoes = d.courses.get(courseID);
+        ArrayList<Echo> fetchedEchoes = new ArrayList<>();
         //check if there are currently fetched echoes for that section
         if (echoes == null) {
             echoes = new ArrayList<>();
-            d.sections.put(sectionID, echoes);
+            d.courses.put(courseID, echoes);
         }
-        WebClient webClient = new WebClient();
-        webClient.getOptions().setJavaScriptEnabled(false);
-
-        UnexpectedPage json = null;
+        //get the JSON data from the API
+        JSONObject obj = getAPIData(courseID);
+        if(obj != null) {
+            JSONObject section = obj.getJSONObject("section");
+            fetchedEchoes = parseEchoes(courseID, section);            
+        }
+        return fetchedEchoes;
+    }
+    
+    private JSONObject getAPIData(String courseID) {
+        JSONObject obj = null; 
+        //First we've gotta load the echo system through blackboard so we are authenticated and save the sectionid
+        webClient.getOptions().setJavaScriptEnabled(true);  
         try {
+            HtmlPage authenticatedEchoes= webClient.getPage("https://lms.uwa.edu.au/webapps/osc-BasicLTI-BBLEARN/window.jsp?course_id=" + courseID + "&id=lectur");
+            int sectionID = Integer.parseInt(authenticatedEchoes.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0]);
+            //then we disable javascript to speed things up
+            webClient.getOptions().setJavaScriptEnabled(false);   
+            //next we load the echoes again to get the sectionID that is used in the api
             HtmlPage page = webClient.getPage(d.echoBase + "/ess/portal/section/" + sectionID);
             String apiSectionID = page.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0];
-            json = webClient.getPage(d.echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
-        } catch(IOException ex) {
-            System.err.println("Failed to contact the API.");
-            return echoes;
-        }
-        //parse json data from the echo api
-        JSONObject obj = new JSONObject(json.getWebResponse().getContentAsString());
-        JSONObject section = obj.getJSONObject("section");
+            UnexpectedPage json = webClient.getPage(d.echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
+            obj = new JSONObject(json.getWebResponse().getContentAsString()); 
+        } catch(IOException Ex) {
+            System.err.println("Failed to get data from the API.");
+        } 
+        return obj;
+    }    
+    
+    public ArrayList<Echo> parseEchoes(String courseID, JSONObject section) {
+        ArrayList<Echo> parsedEchoes = new ArrayList<>();
+        //get a list of all of the previously fetched unique echo IDs
+        List<String> UUIDs = d.courses.get(courseID).stream().map(Echo::getUUID).collect(Collectors.toList());
+
+        //http://prod.lcs.uwa.edu.au:8080/ess/client/api/sections/f1289ed4-77e3-434f-9e93-e9e2b8b472ec/presentations/c0aacd58-20f8-45b5-bc54-ee05080c4077/details.json
+        
         String unit = section.getJSONObject("course").getString("identifier");
+        String unitName = section.getJSONObject("course").getString("name").split("\\[")[0];
         JSONArray presentations = section.getJSONObject("presentations").getJSONArray("pageContents");
-        webClient.close();
-
-        //work out how many new lectures we need to fetch
-        final int totalResults = section.getJSONObject("presentations").getInt("totalResults");
-        final int oldEchoes = d.sections.get(sectionID).size();
-        int newEchoes = totalResults - oldEchoes;
-
-        if (newEchoes == 0) {
-            System.out.println("No new lectures to fetch.");
-            return new ArrayList<>();
-        }
 
         //fetch the new lectures
-        for (int i = 0; i < newEchoes; i++) {
+        for (int i = 0; i < presentations.length(); i++) {
+            String uuid = presentations.getJSONObject(i).getString("uuid");
+            //check if the lecture has already been fetched
+            if(UUIDs.contains(uuid)) {
+                continue;
+            }
             Echo e = new Echo();
+            e.uuid = uuid;
 
-            //find a low thumbnail            
+            //Check that there are thumbnails for that lecture, if there isn't then there is no video component to the lecture          
             JSONArray thumbnails = presentations.getJSONObject(i).getJSONArray("thumbnails");
-            int k;
-            for (k = 0; k < thumbnails.length(); k++) {
-                if (thumbnails.getString(k).contains("low")) {
-                    break;
+            if(thumbnails.length() > 0) { 
+                int k;
+                for (k = 0; k < thumbnails.length(); k++) {
+                    if (thumbnails.getString(k).contains("low")) {
+                        break;
+                    }
+                }
+
+                e.thumbnail = thumbnails.getString(k);
+                e.echoContent = e.thumbnail.split("/synopsis/")[0];
+
+                //Check if there is a downloadable m4v or use m3u8 playlist
+                int responseCode = 404;
+                String audiovga = e.echoContent + "/audio-vga.m4v";
+                try {
+                    URL u = new URL(audiovga);
+                    HttpURLConnection huc =  (HttpURLConnection) u.openConnection(); 
+                    huc.setRequestMethod("HEAD");
+                    responseCode = huc.getResponseCode();
+                } catch (IOException ex) {
+                    Logger.getLogger(echoDownloader.class.getName()).log(Level.SEVERE, null, ex);
+                }
+
+                if(responseCode == HttpURLConnection.HTTP_OK) {
+                    e.url = audiovga;
+                } else {
+                    e.url = "http://media.lcs.uwa.edu.au:1935/echo/_definst_/" + e.echoContent.split("/echocontent/")[1] + "/mp4:audio-vga-streamable.m4v/playlist.m3u8";                
+                }
+            //We can only download the audio file for the lecture
+            } else {
+                try {
+                    HtmlPage audio = webClient.getPage("http://prod.lcs.uwa.edu.au:8080/ess/echo/presentation/" + e.uuid + "/media.mp3");
+                    e.url = audio.getElementsByTagName("embed").get(0).getAttribute("src");
+                    e.echoContent = e.url.replace("/audio.mp3", "");
+                } catch (IOException ex) {
+                    Logger.getLogger(echoDownloader.class.getName()).log(Level.SEVERE, null, ex);
+                
                 }
             }
-            //temporarily store the thumbnail url so it can be downloaded in the next step
-            e.thumbnail = thumbnails.getString(k);
-            String echoContent = e.thumbnail.split("synopsis")[0];
-            e.url = echoContent + "audio-vga.m4v";
-            e.sectionID = sectionID;
+            
+            
+            e.courseID = courseID;
             e.duration = presentations.getJSONObject(i).getLong("durationMS");
-            e.unit = unit;
+            e.unit = unit.toUpperCase();
+            e.unitName = unitName;
             String title = presentations.getJSONObject(i).getString("title");
-            String lectureNumber = title.substring(title.length() - 5, title.length() - 3);
             String rep = "";
             if (title.toLowerCase().contains("repeat")) {
                 e.repeat = true;
@@ -237,58 +392,57 @@ public class echoDownloader {
             } catch (ParseException ex) {
                 System.err.println("Error parsing date from API."); 
             }
-            e.name = String.format("%s - [%tm-%td] [L%s]%s", e.unit, e.date, e.date, lectureNumber, rep);
+            e.episode = presentations.length() - i;
+            Calendar cal = Calendar.getInstance();
+            cal.setTime(e.date);            
+            e.name = String.format("%tB %te%s (%tA)%s", e.date, e.date, getDateSuffix(cal.get(Calendar.DAY_OF_MONTH)), e.date, rep);
 
-            d.sections.get(sectionID).add(e);
+            d.courses.get(courseID).add(e);
+            loadVenue(e);
+            parsedEchoes.add(e);
         }
+        return parsedEchoes;
+    }    
 
-        //make a new thread for downloading thumbnails
-        Thread thread1 = new Thread() {
-            public void run() {
-                long t = System.currentTimeMillis();
-                downloadThumbnails(d.sections.get(sectionID), oldEchoes, totalResults);
-                System.out.println("Downloading thumbnails took " + (System.currentTimeMillis() - t) + " ms");
-            }
-        };
-
-        //make another thread for getting filesizes
-        Thread thread2 = new Thread() {
-            public void run() {
-                long t = System.currentTimeMillis();
-                loadFileSizes(d.sections.get(sectionID), oldEchoes, totalResults);
-                System.out.println("Loading filesizes took " + (System.currentTimeMillis() - t) + " ms");
-            }
-        };
-
-        //make another thread for downloading xmls
-        Thread thread3 = new Thread() {
-            public void run() {
-                long t = System.currentTimeMillis();
-                loadVenues(d.sections.get(sectionID), oldEchoes, totalResults);
-                System.out.println("Loading venues took " + (System.currentTimeMillis() - t) + " ms");
-            }
-        };
-
-        // Start thumbnail and xml downloads
-        thread1.start();
-        thread2.start();
-        thread3.start();
-
+    public void loadVenue(Echo e) {
+        XMLInputFactory inputFactory = XMLInputFactory.newInstance();
+        //get echo details from the presentation.xml
         try {
-            // Wait for them both to finish
-            thread1.join();
-            thread2.join();
-            thread3.join();            
-        } catch (InterruptedException ex) {
-            System.err.println("Failed to fetch echo information.");
+            InputStream in = new URL(e.echoContent + "/presentation.xml").openStream();
+            XMLStreamReader streamReader = inputFactory.createXMLStreamReader(in);
+            streamReader.nextTag(); // Advance to session-info
+            streamReader.nextTag(); // Advance to presentation-properties             
+            while (streamReader.hasNext()) {
+                if (streamReader.isStartElement() && streamReader.getLocalName().equals("location")) {
+                    break;
+                }
+                streamReader.next();
+            }
+            e.venue = streamReader.getElementText();
+            //add the venue code to the name so we don't end up with duplicate filenames
+            in.close();
+        } catch (Exception ex) {
+            Logger.getLogger(echoDownloader.class.getName()).log(Level.SEVERE, null, ex);
         }
+    }    
+    
+    private String getDateSuffix(int day) { 
+        switch (day) {
+            case 1: case 21: case 31:
+                   return ("st");
 
+            case 2: case 22: 
+                   return ("nd");
 
-        saveObject("data.ser", d);
-        System.out.println("Fetched " + newEchoes + " new " + unit + " lectures.\n");
-        return echoes.subList(echoes.size() - newEchoes, echoes.size());
-    }
+            case 3: case 23:
+                   return ("rd");
 
+            default:
+                   return ("th");
+        }
+    }    
+
+    /*
     public void downloadThumbnails(ArrayList<Echo> echoes, int startIndex, int finishIndex) {
         //iterate over all the newly fetched echoes
         for (int k = startIndex; k < finishIndex; k++) {
@@ -332,42 +486,19 @@ public class echoDownloader {
                     + "xhr.send();size;").getJavaScriptResult().toString());
         }
         webClient.close();
-    }
-
-    public void loadVenues(ArrayList<Echo> echoes, int startIndex, int finishIndex) {
-        XMLInputFactory inputFactory = XMLInputFactory.newInstance();
-        //iterate over all the newly fetched echoes        
-        for (int k = startIndex; k < finishIndex; k++) {
-            Echo e = echoes.get(k);
-            //get echo details from the presentation.xml
-            try {
-                InputStream in = new URL(e.url.replace("audio-vga.m4v", "presentation.xml")).openStream();
-                XMLStreamReader streamReader = inputFactory.createXMLStreamReader(in);
-                streamReader.nextTag(); // Advance to session-info
-                streamReader.nextTag(); // Advance to presentation-properties             
-                while (streamReader.hasNext()) {
-                    if (streamReader.isStartElement() && streamReader.getLocalName().equals("location")) {
-                        break;
-                    }
-                    streamReader.next();
-                }
-                e.venue = streamReader.getElementText();
-                //add the venue code to the name so we don't end up with duplicate filenames
-                in.close();
-            } catch (Exception ex) {
-                Logger.getLogger(echoDownloader.class.getName()).log(Level.SEVERE, null, ex);
-            }
-        }
-        saveObject("data.ser", d);
-    }
+    }*/
     
-    public void printLectures(ArrayList<Echo> echoes) {
+    public static void printLectures(ArrayList<Echo> echoes) {
+        System.out.println("\n" + echoes.size() + " lecture(s) found matching the filter.");
         for (Echo e : echoes) {
             String downloaded = "";
             if (e.downloaded) {
                 downloaded = " [Downloaded]";
             }
-            System.out.println(e.name + " " + e.venue + downloaded);
+            String[] venueList = e.venue.split(",");
+            String venue = venueList[venueList.length - 1].split(" \\[")[0].trim();
+            String summary = String.format("%s - %s @ %s%s", e.unit, e.name, venue, downloaded);
+            System.out.println(summary);
         }
     }
 
@@ -432,8 +563,7 @@ public class echoDownloader {
      */
     public static void main(String[] args) throws Exception {
         disableLogs();
-        new Cli(args).parse();
-
+        new Cli(args).parse();       
     }
 
 }

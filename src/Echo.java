@@ -14,37 +14,49 @@ import java.util.Date;
 public class Echo implements Serializable, Comparable<Echo> {
     
     String unit;
+    String unitName;
     String name;    
     String url;
     String venue;
     String thumbnail;
+    String courseID;
+    String echoContent;
+    int episode;
     Date date;
-    int sectionID;
     long fileSize;
     long duration;
     Boolean downloaded;
     Boolean repeat;
+    String uuid;
     
-    Echo(String u, String title, String download, String v, String t, Date d, int sID, long size, long dur, Boolean dl, Boolean r) {
+    Echo(String u, String title, String download, String v, String t, Date d, String cID, long size, long dur, Boolean dl, Boolean r, int ep, String uName, String id, String ec) {
         unit = u;
         name = title;
         url = download;
         venue = v;
         thumbnail = t;
         date = d;        
-        sectionID = sID;
+        courseID = cID;
         fileSize = size;
         duration = dur;
         downloaded = dl;
         repeat = r;
+        episode = ep;
+        unitName = uName;
+        uuid = id;
+        echoContent = ec;
     }
 
     public int compareTo(Echo other) {
         return this.date.compareTo(other.date);
-}    
+    }
+
+    public String getUUID() {
+        return uuid;
+    }    
     
     Echo() {
-        this(null, null, null, null, null, null, 0, 0, 0, false, false);
+        this(null, null, null, null, null, null, null, 0, 0, false, false, 0, null, null, null);
     }
     
 }

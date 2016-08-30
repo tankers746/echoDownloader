@@ -1,1 +1,6 @@
 *.jpg
+*.exe
+*.bat
+*.ser
+private.properties
+nbproject/private/private.properties
