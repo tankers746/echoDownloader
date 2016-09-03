@@ -1,7 +1,6 @@
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.IOException;
 import java.text.ParseException;
@@ -12,7 +11,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -64,10 +62,10 @@ public class Config {
 
                 String line;            
                 while ((line = bufferedReader.readLine()) != null) {
-                    line = line.toLowerCase().trim();
+                    line = line.trim();
                     String[] lineData = line.split("=");
                     if(lineData.length < 2) continue;
-                    lineData[1] = lineData[1].replace("\"", "").trim();
+                    lineData[1] = lineData[1].replaceAll("[\"“”]", "").trim();
                     switch(lineData[0].toLowerCase()) {
                         case "excludeunits" :
                             if(lineData[1] != null) {
@@ -80,7 +78,7 @@ public class Config {
                             }
                             break;
                         case "ffmpeg" :
-                            d.ffmpeg = lineData[1].split("\\.exe")[0];
+                            d.ffmpeg = lineData[1].split("\\.exe")[0].replace("\\", "/").replaceFirst("^~",System.getProperty("user.home"));;
                             break; 
                         case "before" :
                             try {
@@ -104,9 +102,9 @@ public class Config {
                         case "downloadsfolder" :
                             d.downloads = null;
                             //switch backslash to forward slash and remove quotations
-                            String dir = lineData[1].replace("\\", "/");
+                            String dir = lineData[1].replace("\\", "/").replaceFirst("^~",System.getProperty("user.home"));
                             File f = new File(dir);
-                            if(f.exists() && f.isDirectory()) {
+                            if(f.getAbsoluteFile().exists() && f.getAbsoluteFile().isDirectory()) {
                                 d.downloads = dir;
                             } else System.err.println("Downloads folder not valid.");
                             break;                      

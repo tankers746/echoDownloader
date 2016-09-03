@@ -1,12 +1,9 @@
 
 import com.gargoylesoftware.htmlunit.WebClient;
 import java.io.BufferedInputStream;
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import org.apache.commons.cli.CommandLine;

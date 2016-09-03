@@ -3,30 +3,19 @@
  * To change this template file, choose Tools | Templates
  * and open the template in the editor.
  */
-import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
-import com.gargoylesoftware.htmlunit.NicelyResynchronizingAjaxController;
 import com.gargoylesoftware.htmlunit.UnexpectedPage;
 import com.gargoylesoftware.htmlunit.WebClient;
 import com.gargoylesoftware.htmlunit.html.DomElement;
 import com.gargoylesoftware.htmlunit.html.HtmlElement;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.Charset;
-import java.nio.file.Files;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -38,8 +27,6 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamReader;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.FilenameUtils;
 import org.json.*;
 
 /**
@@ -96,8 +83,7 @@ public class echoDownloader {
         File f = new File(filename + ext);
         int n = 1;
         while(f.exists()) {
-            filename = filename + " (" + n++ + ")";
-            f = new File(filename + ext);
+            f = new File(filename + " (" + n++ + ")" + ext);
         }
         
         System.out.println("Downloading '" + f.getName() + "'...");        
@@ -126,10 +112,14 @@ public class echoDownloader {
             args.add("show=" + e.unit + " - " + e.unitName);
             
             args.add("-metadata");
-            args.add("title=" + e.name);
+            args.add("title=" + e.name);          
             
             args.add("-metadata");
-            args.add("episode_id=" + e.episode);   
+            args.add("episode_sort=" + e.episode);   
+
+            //media type is tv show for iTunes
+            args.add("-metadata");
+            args.add("media_type=10");               
             
             if(m3u8) {               
                 args.add("-bsf:a");
