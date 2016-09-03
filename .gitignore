@@ -4,3 +4,4 @@
 *.ser
 private.properties
 nbproject/private/private.properties
+/dist/

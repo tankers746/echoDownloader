@@ -12,7 +12,6 @@ import java.util.Date;
  * @author Tom
  */
 public class Echo implements Serializable, Comparable<Echo> {
-    
     String unit;
     String unitName;
     String name;    
@@ -20,16 +19,16 @@ public class Echo implements Serializable, Comparable<Echo> {
     String venue;
     String thumbnail;
     String courseID;
-    String echoContent;
+    String contentDir;
+    String streamDir;
     int episode;
     Date date;
     long fileSize;
     long duration;
     Boolean downloaded;
-    Boolean repeat;
     String uuid;
     
-    Echo(String u, String title, String download, String v, String t, Date d, String cID, long size, long dur, Boolean dl, Boolean r, int ep, String uName, String id, String ec) {
+    Echo(String u, String title, String download, String v, String t, Date d, String cID, long size, long dur, Boolean dl, int ep, String uName, String id, String content, String stream) {
         unit = u;
         name = title;
         url = download;
@@ -40,13 +39,14 @@ public class Echo implements Serializable, Comparable<Echo> {
         fileSize = size;
         duration = dur;
         downloaded = dl;
-        repeat = r;
         episode = ep;
         unitName = uName;
         uuid = id;
-        echoContent = ec;
+        contentDir = content;
+        streamDir = stream;
     }
 
+    @Override
     public int compareTo(Echo other) {
         return this.date.compareTo(other.date);
     }
@@ -56,7 +56,7 @@ public class Echo implements Serializable, Comparable<Echo> {
     }    
     
     Echo() {
-        this(null, null, null, null, null, null, null, 0, 0, false, false, 0, null, null, null);
+        this(null, null, null, null, null, null, null, 0, 0, false, 0, null, null, null, null);
     }
     
 }

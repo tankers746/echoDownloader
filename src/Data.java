@@ -7,6 +7,8 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -19,33 +21,30 @@ import java.util.HashMap;
  * @author Tom
  */
 public class Data implements Serializable {
-    HashMap<String, ArrayList<Echo>> courses;
-    ArrayList<String> venues;
-    String echoBase;
-    String downloads;   
-    String ffmpeg;
+    private static final Logger LOGGER = Logger.getLogger(Data.class.getName());
+    final String filename = "data.ser"; 
+    
+    HashMap<String, String> units;    
+    HashMap<String, ArrayList<Echo>> courseEchoes;
     
     Data() {
-        courses = new HashMap<>();
-        venues = new ArrayList<>();
-        echoBase= "http://prod.lcs.uwa.edu.au:8080/";
-        downloads = "";
-        ffmpeg = "";
+        units = new HashMap<>();        
+        courseEchoes = new HashMap<>();
     } 
 
-    public static final void saveObject(String filename, Object h) {
+    public void save() {
         try {
             FileOutputStream fos = new FileOutputStream(filename);
             ObjectOutputStream oos = new ObjectOutputStream(fos);
-            oos.writeObject(h);
+            oos.writeObject(this);
             oos.close();
             fos.close();
         } catch (IOException e) {
-            System.err.println("Error saving " + filename);
+            LOGGER.log(Level.SEVERE, "Error saving {0}", filename);
         }
     }
 
-    public static final Object getObject(String filename) {
+    public boolean load() {
         Object obj = null;
         try {
             FileInputStream fis = new FileInputStream(filename);
@@ -54,8 +53,13 @@ public class Data implements Serializable {
             ois.close();
             fis.close();
         } catch (IOException | ClassNotFoundException e) {
-            System.err.println("Error reading " + filename);
+            LOGGER.log(Level.WARNING, "Error reading {0}\n", filename);
         }
-        return obj;
+        Data loadedData = (Data) obj;
+        if(loadedData != null) {
+            courseEchoes = loadedData.courseEchoes;
+            units = loadedData.units;
+        }
+        return (obj != null);
     }    
 }

@@ -1,6 +1,5 @@
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.text.ParseException;
@@ -9,8 +8,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /*
  * To change this license header, choose License Headers in Project Properties.
@@ -23,37 +23,29 @@ import java.util.List;
  * @author Tom
  */
 public class Config {
-    List<String> courseIDs;
+    private static final Logger LOGGER = Logger.getLogger(Config.class.getName());
+    Data data;
+    List<String> excludeUnits;
     List<String> excludeVenues;
-    Boolean downloaded;
-    Boolean repeats;
     Date before;
     Date after;
+    String ffmpeg;
+    String downloads;
     
     Config() {
-        courseIDs = new ArrayList<>();
+        //first we load the saved data
+        data = new Data();
+        if (data.load() == false) { //checks if there is a saved table
+            data.save();
+        }
+        excludeUnits = new ArrayList<>();
         excludeVenues = new ArrayList<>();
-        downloaded = null;
-        repeats = null;
         before = null;
         after = null;
-        
     }
     
-    Config(List courses, List vns, Boolean dld, Boolean rpt, Date bf, Date af) {
-        this();
-        if(courses != null) courseIDs = courses;
-        if(vns != null) excludeVenues = vns;
-        downloaded = dld;
-        repeats = rpt;
-        before = bf;
-        after = af;
-        
-    }
-    
-    Config(Data d, HashMap<String, String> units, String path) {
-        this();
-        List<String> excludeUnits = new ArrayList<>();   
+    Config(String path) {
+        this(); 
         
         if(path != null) {
             try {
@@ -78,14 +70,14 @@ public class Config {
                             }
                             break;
                         case "ffmpeg" :
-                            d.ffmpeg = lineData[1].split("\\.exe")[0].replace("\\", "/").replaceFirst("^~",System.getProperty("user.home"));;
+                            ffmpeg = lineData[1].split("\\.exe")[0].replace("\\", "/").replaceFirst("^~",System.getProperty("user.home"));;
                             break; 
                         case "before" :
                             try {
                                 SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy");  
                                 if(lineData[1] != null) before = sdf.parse(lineData[1]);
                             } catch (ParseException ex) {
-                                System.err.println("Error parsing before.");
+                                LOGGER.log(Level.WARNING,"Error parsing before.");
                             }
                             break;
                         case "after" :
@@ -93,33 +85,21 @@ public class Config {
                                 SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy hh:mm");  
                                 if(lineData[1] != null) after = sdf.parse(lineData[1]+" 23:59");
                             } catch (ParseException ex) {
-                                System.err.println("Error parsing after.");
+                                LOGGER.log(Level.WARNING,"Error parsing after.");
                             }
-                            break;
-                        case "echobase" :
-                            d.echoBase = lineData[1];
                             break;  
                         case "downloadsfolder" :
-                            d.downloads = null;
                             //switch backslash to forward slash and remove quotations
-                            String dir = lineData[1].replace("\\", "/").replaceFirst("^~",System.getProperty("user.home"));
-                            File f = new File(dir);
-                            if(f.getAbsoluteFile().exists() && f.getAbsoluteFile().isDirectory()) {
-                                d.downloads = dir;
-                            } else System.err.println("Downloads folder not valid.");
+                            downloads = lineData[1].replace("\\", "/").replaceFirst("^~",System.getProperty("user.home"));
                             break;                      
                     }
                 }
                 bufferedReader.close();
             } catch(IOException Ex) {
-                System.err.println("Failed to read config file check that the path is correct.");
+                LOGGER.log(Level.SEVERE,"Failed to read config file check that the path is correct.");
             }
         }
-        for(String unit : units.keySet()) {            
-            if(!excludeUnits.contains(unit.toUpperCase())) {
-                courseIDs.add(units.get(unit.toUpperCase()));
-            }
-        }
+
     }    
     
     private boolean containsVenue(String echoVenue, List<String> filterVenues) {
@@ -129,20 +109,20 @@ public class Config {
         return false;
     }    
     
-    public ArrayList<Echo> filterEchoMap(HashMap<String, ArrayList<Echo>> sections) {
+    public ArrayList<Echo> filterEchoes(Boolean downloaded) {
         ArrayList<Echo> filteredEchoes = new ArrayList<>();  
-        sections.keySet().stream()
-                .forEach((k) -> filteredEchoes.addAll(filterEchoList(sections.get(k))));
+        data.courseEchoes.keySet().stream()
+                .forEach((k) -> filteredEchoes.addAll(filterEchoList(data.courseEchoes.get(k), downloaded)));
         Collections.sort(filteredEchoes, Collections.reverseOrder());
         return filteredEchoes;
     }
     
-    public List<Echo> filterEchoList(List<Echo> echoes) {
+    public List<Echo> filterEchoList(List<Echo> echoes, Boolean downloaded) {
         ArrayList<Echo> filteredEchoes = new ArrayList<>();  
         echoes.stream()
-                .filter((e) -> (courseIDs.isEmpty() || courseIDs.contains(e.courseID)))
+                .filter((e) -> (downloaded == null || downloaded.equals(e.downloaded)))
+                .filter((e) -> (excludeUnits.isEmpty() || !excludeUnits.contains(e.unit)))
                 .filter((e) -> (excludeVenues.isEmpty() || !containsVenue(e.venue, excludeVenues)))
-                .filter((e) -> (repeats == null || repeats.equals(e.repeat)))
                 .filter((e) -> (before == null || e.date.before(before)))
                 .filter((e) -> (after == null || e.date.after(after)))                        
                 .filter((e) -> (!filteredEchoes.contains(e)))
@@ -150,5 +130,29 @@ public class Config {
         Collections.sort(filteredEchoes, Collections.reverseOrder());
         return filteredEchoes;
     }
+    
+    public void printFiltered() {
+        ArrayList<Echo> echoList = filterEchoes(null);
+        LOGGER.log(Level.INFO, "{0} lecture(s) found matching the filter.\n", echoList.size());
+        for (Echo e : echoList) {
+            String downloaded = "";
+            if (e.downloaded) {
+                downloaded = " [Downloaded]";
+            }
+            String[] venueList = e.venue.split(",");
+            String venue = venueList[venueList.length - 1].split(" \\[")[0].trim();
+            String summary = String.format("%s - %s @ %s%s", e.unit, e.name, venue, downloaded);
+            System.out.println(summary);
+        }
+    }
+
+    public void setEchoesDownloaded(Boolean setValue) {
+        ArrayList<Echo> echoList = filterEchoes(null);
+        for(Echo e : echoList) {
+            e.downloaded = setValue;
+        }       
+        data.save();
+        LOGGER.log(Level.INFO,"Lectures matching filter have been set [Downloaded] = {0}\n", setValue); 
+    }    
         
 }

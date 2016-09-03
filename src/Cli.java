@@ -1,10 +1,13 @@
 
-import com.gargoylesoftware.htmlunit.WebClient;
-import java.io.BufferedInputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.stream.Collectors;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.util.logging.FileHandler;
+import java.util.logging.Formatter;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -15,6 +18,7 @@ import org.apache.commons.cli.ParseException;
 
 public class Cli {
 
+    private static final Logger LOGGER = Logger.getLogger(Cli.class.getName());
     private String[] args = null;
     private Options options = new Options();
 
@@ -23,7 +27,7 @@ public class Cli {
         this.args = args;
         
         if(args.length < 1) {
-            System.err.println("Please enter a command. Type -h for help.");
+            LOGGER.log(Level.INFO, "Please enter a command. Type -h for help.");
             System.exit(0);
         }
 
@@ -41,18 +45,6 @@ public class Cli {
     public void parse() {
         CommandLineParser parser = new GnuParser();
         CommandLine cmd = null;
-        
-        //first we load the saved data
-        Data d = (Data) Data.getObject("data.ser");
-        if (d == null) { //checks if there is a saved table
-            d = new Data();
-            Data.saveObject("data.ser", d);
-        }     
-        HashMap<String, String> units = (HashMap<String, String>) Data.getObject("units.ser");
-        if (units == null) { //checks if there is a saved table
-            units = new HashMap<>();
-            Data.saveObject("units.ser", units);
-        }
         
         String configPath = null;
         String user = null;
@@ -95,78 +87,42 @@ public class Cli {
             }             
             
         } catch (ParseException e) {
-            System.err.println(e.getMessage());
+            LOGGER.log(Level.SEVERE, e.getMessage());
             help();
         }
         
-        Config c = new Config(d, units, configPath);
-        ArrayList<Echo> echoList = c.filterEchoMap(d.courses);  
+        Config config = new Config(configPath);
         
         if(setDownloaded != null) {
-            echoDownloader.setEchoesDownloaded(echoList, setDownloaded);
-            Data.saveObject("data.ser", d);
+            config.setEchoesDownloaded(setDownloaded);
         }
         
         if(list) {
-            echoDownloader.printLectures(echoList);
-            return;
+            config.printFiltered();
         }
      
         //fetching requires an LMS login
         if(fetch) {
             //Check that we can login to LMS
-            if(user != null || pass != null) {
-                WebClient webClient = new WebClient();
-                webClient.getOptions().setJavaScriptEnabled(false);  
-                BlackboardConnector bc = new BlackboardConnector(user, pass);
-                bc.loginLMS(webClient);
-                echoDownloader ld = new echoDownloader(webClient, bc, d, units);
-                //Check that LMS login worked
-                if(bc.BBHome != null) {
-                    ld.fetch(c);
-                    Data.saveObject("data.ser", d);
-                    echoList = c.filterEchoMap(d.courses);                    
-                }
-                webClient.close();
+            if(user != null && pass != null) {
+                Fetcher fetcher = new Fetcher(config, user, pass);
+                fetcher.fetch();               
             } else {
-                System.err.println("Please specify a username and password for LMS using -u and -p.");
+                LOGGER.log(Level.SEVERE, "Please specify a username and password for LMS using -u and -p.\n");
             }
         }
         
         //downloading requires a config file
         if(download) {
             if(configPath != null) {
-                if(d.downloads != null) {
-                    if(checkffmpeg(d.ffmpeg)) {
-                        echoList = echoList.stream().filter((e) -> (!e.downloaded)).collect(Collectors.toCollection(ArrayList::new));
-                        echoDownloader.downloadEchoes(echoList, d.downloads, d.ffmpeg, verbose); 
-                        Data.saveObject("data.ser", d);                        
-                    }
-                } else System.err.println("Ensure you have specified a valid downloadsFolder in the config file.");         
-            } else System.err.println("Please specify a config file.");        
+                Downloader downloader = new Downloader(config, verbose);
+                if(downloader.checkDownloadsFolder() && downloader.checkffmpeg()) {
+                    downloader.download();                     
+                }    
+            } else LOGGER.log(Level.SEVERE, "Please specify a config file to download lectures.\n");        
         }
     }
     
-    private boolean checkffmpeg(String path) {
-        boolean works = false;
-        try {        
-            // start execution
-            Process p = Runtime.getRuntime().exec(path + " -?");
-            // exhaust input stream
-            BufferedInputStream in = new BufferedInputStream(p.getInputStream());
-            byte[] bytes = new byte[4096];
-            while (in.read(bytes) != -1) {}
-            // wait for completion
-            int exitCode = p.waitFor();
-            if(exitCode == 0) {
-                works = true;
-            }
-        } catch (IOException | InterruptedException ex) {
-            System.err.println("Unable to access ffmpeg, make sure the correct path is specified in the config file.");
-        }
-        return works;
-    }
-         
     private Boolean parseBoolean(String s) {
         if(s == null) return null;
         if(s.toLowerCase().equals("true")) return true;
@@ -180,4 +136,61 @@ public class Cli {
         formater.printHelp("Main", options);
         System.exit(0);
     }
+    
+    private static void disableLogs() {
+        java.util.logging.Logger.getLogger("com.gargoylesoftware").setLevel(Level.OFF);
+        System.setProperty("org.apache.commons.logging.Log", "org.apache.commons.logging.impl.NoOpLog");
+
+    }
+    
+    static class ConsoleFormatter extends Formatter {
+
+        //private static final String PATTERN = "MMM dd, yyyy h:mm:ss a";
+        //new SimpleDateFormat(PATTERN).format(new Date(record.getMillis()));
+        
+
+        @Override
+        public String format(final LogRecord record) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(record.getLevel().getLocalizedName())
+                .append(": ")
+                .append(formatMessage(record))
+                .append(System.getProperty("line.separator"));
+            
+            if (record.getThrown() != null) {
+                try {
+                    StringWriter sw = new StringWriter();
+                    PrintWriter pw = new PrintWriter(sw);
+                    record.getThrown().printStackTrace(pw);
+                    pw.close();
+                    sb.append(sw.toString());
+                } catch (Exception ex) {
+                    // ignore
+                }
+            }
+            return sb.toString();
+        }
+    }    
+    
+    /**
+     * @param args the command line arguments
+     */
+    public static void main(String[] args) throws Exception {
+        System.out.println("");
+        disableLogs();
+        Logger rootLogger = Logger.getLogger("");
+        rootLogger.setLevel(Level.FINER);
+        
+        ConsoleFormatter vsf = new ConsoleFormatter();    
+        for(Handler ch : rootLogger.getHandlers()) {
+            ch.setFormatter(vsf);
+        }        
+        Handler fh = new FileHandler("echoDownloader.log", true);  // append is true     
+        fh.setLevel(Level.FINER);
+        SimpleFormatter sf = new SimpleFormatter();
+        fh.setFormatter(sf);
+        rootLogger.addHandler(fh);
+
+        new Cli(args).parse();       
+    }    
 }

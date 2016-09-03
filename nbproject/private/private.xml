@@ -5,10 +5,11 @@
         <group>
             <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/Data.java</file>
             <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/BlackboardConnector.java</file>
-            <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/echoDownloader.java</file>
             <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/Cli.java</file>
+            <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/Fetcher.java</file>
             <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/Config.java</file>
             <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/Echo.java</file>
+            <file>file:/C:/Users/Tom/OneDrive/Documents/NetBeansProjects/echoDownloader/src/Downloader.java</file>
         </group>
     </open-files>
 </project-private>
