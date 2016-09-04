@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import javafx.util.Pair;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
@@ -34,7 +35,6 @@ import org.json.*;
  */
 public class Fetcher {
     private static final Logger LOGGER = Logger.getLogger(Fetcher.class.getName());
-    final String echoBase = "http://prod.lcs.uwa.edu.au:8080";
     Config c;
     BlackboardConnector bc;
 
@@ -82,21 +82,22 @@ public class Fetcher {
             c.data.courseEchoes.put(courseID, echoes);
         }
         //get the JSON data from the API
-        JSONObject obj = getAPIData(courseID);
-        if(obj != null) {
-            JSONObject section = obj.getJSONObject("section");
-            fetchedEchoes = parseEchoes(courseID, section);            
+        Pair<String, JSONObject> apiData = getAPIData(courseID);
+        if(apiData.getValue() != null) {
+            fetchedEchoes = parseEchoes(courseID, apiData);            
         }
         return fetchedEchoes;
     }
     
-    private JSONObject getAPIData(String courseID) {
+    private Pair<String, JSONObject> getAPIData(String courseID) {
         long t = System.currentTimeMillis();
         JSONObject obj = null; 
+        String echoBase = null;
         //First we've gotta load the echo system through blackboard so we are authenticated and save the sectionid
         bc.webClient.getOptions().setJavaScriptEnabled(true);  
         try {
             HtmlPage authenticatedEchoes= bc.webClient.getPage(bc.lms + "/webapps/osc-BasicLTI-BBLEARN/window.jsp?course_id=" + courseID + "&id=lectur");
+            echoBase = "http://" + authenticatedEchoes.getUrl().getAuthority();
             int sectionID = Integer.parseInt(authenticatedEchoes.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0]);
             //then we disable javascript to speed things up
             bc.webClient.getOptions().setJavaScriptEnabled(false);   
@@ -109,14 +110,15 @@ public class Fetcher {
             LOGGER.log(Level.WARNING, "Failed to get data from the API.");
         } 
         LOGGER.log(Level.FINE, "Getting JSON data for {0} took {1} ms", new Object[] {courseID, System.currentTimeMillis() - t});   
-        return obj;
+        return new Pair<>(echoBase, obj);
     }    
     
-    public ArrayList<Echo> parseEchoes(String courseID, JSONObject section) {
+    public ArrayList<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData) {
         ArrayList<Echo> parsedEchoes = new ArrayList<>();
         //get a list of all of the previously fetched unique echo IDs
         List<String> UUIDs = c.data.courseEchoes.get(courseID).stream().map(Echo::getUUID).collect(Collectors.toList());
         
+        JSONObject section = apiData.getValue().getJSONObject("section");
         String unit = section.getJSONObject("course").getString("identifier");
         String unitName = section.getJSONObject("course").getString("name").split("\\[")[0];
         JSONArray presentations = section.getJSONObject("presentations").getJSONArray("pageContents");
@@ -133,13 +135,13 @@ public class Fetcher {
             }
             Echo e = new Echo();
             e.uuid = uuid;
-            
+            e.echoBase = apiData.getKey();            
             //loads the contentDir && streamDir for use in later steps
             if(!loadPresentationDirs(e)) {
                 continue;
             }
             
-            e.courseID = courseID;
+
             e.duration = presentations.getJSONObject(i).getLong("durationMS");
             e.unit = unit.toUpperCase();
             e.unitName = unitName;
@@ -152,7 +154,7 @@ public class Fetcher {
             }
             Calendar cal = Calendar.getInstance();
             cal.setTime(e.date);            
-            e.name = String.format("%tB %te%s (%tA)", e.date, e.date, getDateSuffix(cal.get(Calendar.DAY_OF_MONTH)), e.date);            
+            e.title = String.format("%tB %te%s (%tA)", e.date, e.date, getDateSuffix(cal.get(Calendar.DAY_OF_MONTH)), e.date);            
             
             //Check that there are thumbnails for that lecture, if there isn't then there is no video component to the lecture          
             JSONArray thumbnails = presentations.getJSONObject(i).getJSONArray("thumbnails");
@@ -171,7 +173,7 @@ public class Fetcher {
             e.url = getDownloadURL(e);
             e.venue = getVenue(e);
             parsedEchoes.add(e);
-            LOGGER.log(Level.FINE, "Total parse time for {0} is {1} ms", new Object[] {e.name, System.currentTimeMillis() - t});             
+            LOGGER.log(Level.FINE, "Total parse time for {0} is {1} ms", new Object[] {e.title, System.currentTimeMillis() - t});             
         }
         return parsedEchoes;
     }
@@ -190,7 +192,7 @@ public class Fetcher {
                 huc.setRequestMethod("HEAD");
                 responseCode = huc.getResponseCode();
             } catch (IOException ex) {
-                LOGGER.log(Level.WARNING, "Failed accessing {0} for {1}", new Object[] {audiovga, e.name});
+                LOGGER.log(Level.WARNING, "Failed accessing {0} for {1}", new Object[] {audiovga, e.title});
             }
 
             //If the downloadable m4v exists use that, if not we have to use the m3u8 playlist
@@ -203,14 +205,14 @@ public class Fetcher {
         } else {
             download = e.contentDir + "audio.mp3";
         }
-        LOGGER.log(Level.FINE, "Got download URL for {0} in {1} ms {2}", new Object[] {e.name, System.currentTimeMillis() - t, download}); 
+        LOGGER.log(Level.FINE, "Got download URL for {0} in {1} ms {2}", new Object[] {e.title, System.currentTimeMillis() - t, download}); 
         return download;
     }
 
     public boolean loadPresentationDirs(Echo e) {
         long t = System.currentTimeMillis();        
         try {
-            HtmlPage presentation = bc.webClient.getPage(echoBase + "/ess/echo/presentation/" + e.uuid);
+            HtmlPage presentation = bc.webClient.getPage(e.echoBase + "/ess/echo/presentation/" + e.uuid);
             LOGGER.log(Level.FINE, "Loading {0} took {1} ms {2}", new Object[] {presentation.getUrl(), presentation.getWebResponse().getLoadTime()}); 
             String requestURL = presentation.getElementsByTagName("iframe").get(0).getAttribute("src");
             List<NameValuePair> params = URLEncodedUtils.parse(new URI(requestURL), "UTF-8");
@@ -234,7 +236,7 @@ public class Fetcher {
         } catch(IOException | FailingHttpStatusCodeException | URISyntaxException ex) {
             LOGGER.log(Level.WARNING, "Error loading presentation URLs for UUID {0}.", e.uuid); 
         }
-        LOGGER.log(Level.FINE, "Loaded presentation dirs in {0}", System.currentTimeMillis() - t); 
+        LOGGER.log(Level.FINE, "Loaded presentation dirs in {0} ms", System.currentTimeMillis() - t); 
         return (e.contentDir != null && e.streamDir != null);
     }
 
@@ -257,9 +259,9 @@ public class Fetcher {
             venue = streamReader.getElementText();
             in.close();
         } catch (IOException | XMLStreamException ex) {
-            LOGGER.log(Level.WARNING, "Error loading venue for {0}.", e.name); 
+            LOGGER.log(Level.WARNING, "Error loading venue for {0}.", e.title); 
         }
-        LOGGER.log(Level.FINE, "Loaded venue for {0} in {1} ms", new Object[] {e.name, System.currentTimeMillis() - t}); 
+        LOGGER.log(Level.FINE, "Loaded venue for {0} in {1} ms", new Object[] {e.title, System.currentTimeMillis() - t}); 
         return venue;
     }    
     

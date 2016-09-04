@@ -57,7 +57,7 @@ public class Downloader {
         }        
         
         String basePath = c.downloads + "/" + e.unit + "/";
-        String filename =  String.format("%s%s - S01E%02d - %s", basePath, e.unit, e.episode, e.name);
+        String filename =  String.format("%s%s - S01E%02d - %s", basePath, e.unit, e.episode, e.title);
         File f = new File(filename + ext);
         int n = 1;
         while(f.exists()) {
@@ -89,7 +89,7 @@ public class Downloader {
             args.add("show=" + e.unit + " - " + e.unitName);
             
             args.add("-metadata");
-            args.add("title=" + e.name);          
+            args.add("title=" + e.title);          
             
             args.add("-metadata");
             args.add("episode_sort=" + e.episode);   

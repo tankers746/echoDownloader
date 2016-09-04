@@ -14,11 +14,11 @@ import java.util.Date;
 public class Echo implements Serializable, Comparable<Echo> {
     String unit;
     String unitName;
-    String name;    
+    String title;    
     String url;
     String venue;
     String thumbnail;
-    String courseID;
+    String echoBase;
     String contentDir;
     String streamDir;
     int episode;
@@ -28,14 +28,14 @@ public class Echo implements Serializable, Comparable<Echo> {
     Boolean downloaded;
     String uuid;
     
-    Echo(String u, String title, String download, String v, String t, Date d, String cID, long size, long dur, Boolean dl, int ep, String uName, String id, String content, String stream) {
+    Echo(String u, String name, String download, String v, String t, Date d, String baseUrl, long size, long dur, Boolean dl, int ep, String uName, String id, String content, String stream) {
         unit = u;
-        name = title;
+        title = name;
         url = download;
         venue = v;
         thumbnail = t;
         date = d;        
-        courseID = cID;
+        echoBase = baseUrl;
         fileSize = size;
         duration = dur;
         downloaded = dl;

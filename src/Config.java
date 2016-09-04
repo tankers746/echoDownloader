@@ -141,7 +141,7 @@ public class Config {
             }
             String[] venueList = e.venue.split(",");
             String venue = venueList[venueList.length - 1].split(" \\[")[0].trim();
-            String summary = String.format("%s - %s @ %s%s", e.unit, e.name, venue, downloaded);
+            String summary = String.format("%s - %s @ %s%s", e.unit, e.title, venue, downloaded);
             System.out.println(summary);
         }
     }
