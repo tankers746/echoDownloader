@@ -3,8 +3,8 @@
 *.bat
 *.ser
 *.log
-private.properties
-nbproject/private/private.properties
+manifest.mf
+build.xml
+/nbproject/
 /dist/
-nbproject/private/private.properties
-*.log
+/build/

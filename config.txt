@@ -1,6 +1,6 @@
 downloadsfolder="D:\lectures"
 ffmpeg=ffmpeg.exe
-excludeunits=
+excludeunits=ensc2002,cits3402,cits3200
 excludevenues=
 after=25/07/2016
 before=

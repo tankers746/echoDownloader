@@ -91,15 +91,7 @@ public class Cli {
             help();
         }
         
-        Config config = new Config(configPath);
-        
-        if(setDownloaded != null) {
-            config.setEchoesDownloaded(setDownloaded);
-        }
-        
-        if(list) {
-            config.printFiltered();
-        }
+        Config config = new Config(configPath);        
      
         //fetching requires an LMS login
         if(fetch) {
@@ -121,6 +113,14 @@ public class Cli {
                 }    
             } else LOGGER.log(Level.SEVERE, "Please specify a config file to download lectures.\n");        
         }
+        
+        if(setDownloaded != null) {
+            config.setEchoesDownloaded(setDownloaded);
+        }
+        
+        if(list) {
+            config.printFiltered();
+        }        
     }
     
     private Boolean parseBoolean(String s) {

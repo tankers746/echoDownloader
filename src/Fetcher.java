@@ -6,10 +6,14 @@
 import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
 import com.gargoylesoftware.htmlunit.UnexpectedPage;
 import com.gargoylesoftware.htmlunit.WebClient;
+import com.gargoylesoftware.htmlunit.html.DomNodeList;
+import com.gargoylesoftware.htmlunit.html.HtmlElement;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import com.gargoylesoftware.htmlunit.html.HtmlTable;
+import com.gargoylesoftware.htmlunit.html.HtmlTableCell;
+import com.gargoylesoftware.htmlunit.html.HtmlTableRow;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -17,6 +21,7 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -56,7 +61,7 @@ public class Fetcher {
                 //Dont fetch units found in excludeunits
                 if(!c.excludeUnits.contains(unit.toUpperCase())) {
                     String courseID = c.data.units.get(unit);
-                    ArrayList<Echo> fetched = fetchEchoes(courseID);    
+                    List<Echo> fetched = fetchEchoes(courseID);    
                     if (fetched.isEmpty()) {
                         LOGGER.log(Level.INFO, "No new {0} lectures to fetch.", unit); 
                     } else {
@@ -73,9 +78,9 @@ public class Fetcher {
         bc.webClient.close();
     }    
 
-    public ArrayList<Echo> fetchEchoes(String courseID) {
+    public List<Echo> fetchEchoes(String courseID) {
         ArrayList<Echo> echoes = c.data.courseEchoes.get(courseID);
-        ArrayList<Echo> fetchedEchoes = new ArrayList<>();
+        List<Echo> fetchedEchoes = new ArrayList<>();
         //check if there are currently fetched echoes for that section
         if (echoes == null) {
             echoes = new ArrayList<>();
@@ -113,92 +118,109 @@ public class Fetcher {
         return new Pair<>(echoBase, obj);
     }    
     
-    public ArrayList<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData) {
-        ArrayList<Echo> parsedEchoes = new ArrayList<>();
+    public List<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData) {
+        List<Echo> parsedEchoes = Collections.synchronizedList(new ArrayList<Echo>());
         //get a list of all of the previously fetched unique echo IDs
         List<String> UUIDs = c.data.courseEchoes.get(courseID).stream().map(Echo::getUUID).collect(Collectors.toList());
         
         JSONObject section = apiData.getValue().getJSONObject("section");
+        String echoBase = apiData.getKey();
         String unit = section.getJSONObject("course").getString("identifier");
         String unitName = section.getJSONObject("course").getString("name").split("\\[")[0];
         JSONArray presentations = section.getJSONObject("presentations").getJSONArray("pageContents");
-
-        //fetch the new lectures
+        
         for (int i = 0; i < presentations.length(); i++) {
-            long t = System.currentTimeMillis();
             String uuid = presentations.getJSONObject(i).getString("uuid");
-            LOGGER.log(Level.FINE, "Loading echo data for UUID = {0}.", uuid); 
-
-            //check if the lecture has already been fetched
             if(UUIDs.contains(uuid)) {
                 continue;
-            }
+            }            
             Echo e = new Echo();
             e.uuid = uuid;
-            e.echoBase = apiData.getKey();            
-            //loads the contentDir && streamDir for use in later steps
-            if(!loadPresentationDirs(e)) {
-                continue;
-            }
-            
-
-            e.duration = presentations.getJSONObject(i).getLong("durationMS");
-            e.unit = unit.toUpperCase();
+            e.unit = unit;
             e.unitName = unitName;
-            e.episode = presentations.length() - i;            
-            try {
-                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");                
-                e.date = sdf.parse(presentations.getJSONObject(i).getString("startTime"));
-            } catch (ParseException ex) {
-                LOGGER.log(Level.WARNING, "Error parsing date."); 
-            }
-            Calendar cal = Calendar.getInstance();
-            cal.setTime(e.date);            
-            e.title = String.format("%tB %te%s (%tA)", e.date, e.date, getDateSuffix(cal.get(Calendar.DAY_OF_MONTH)), e.date);            
-            
-            //Check that there are thumbnails for that lecture, if there isn't then there is no video component to the lecture          
-            JSONArray thumbnails = presentations.getJSONObject(i).getJSONArray("thumbnails");
-            
-            //get a low thumbnail url
-            if(thumbnails.length() > 0) { 
-                int k;
-                for (k = 0; k < thumbnails.length(); k++) {
-                    if (thumbnails.getString(k).contains("low")) {
-                        break;
-                    }
-                }
-                e.thumbnail = thumbnails.getString(k);
-            }
-            
-            e.url = getDownloadURL(e);
-            e.venue = getVenue(e);
+            e.episode = presentations.length() - i;
+            e.echoBase = echoBase;
+
             parsedEchoes.add(e);
-            LOGGER.log(Level.FINE, "Total parse time for {0} is {1} ms", new Object[] {e.title, System.currentTimeMillis() - t});             
         }
+        
+        parsedEchoes.parallelStream()
+                .forEach((e) -> populateEcho(e, presentations.getJSONObject(presentations.length() - e.episode)));
         return parsedEchoes;
     }
     
-    public String getDownloadURL(Echo e) {
+    public void populateEcho(Echo e, JSONObject presentation) {
         long t = System.currentTimeMillis();
-        String download;
+        LOGGER.log(Level.FINE, "Loading echo data for UUID = {0}.", e.uuid); 
+        WebClient wc = new WebClient();
+        wc.setCookieManager(bc.cookieManager);
+        wc.getOptions().setJavaScriptEnabled(false);   
+        wc.getOptions().setCssEnabled(false); 
+        wc.getOptions().setAppletEnabled(false);             
+        
+        //loads the contentDir && streamDir for use in later steps
+        Pair<String, String> presentationDirs = loadPresentationDirs(e, wc);
+        e.contentDir = presentationDirs.getKey();
+        e.streamDir = presentationDirs.getValue();
+            
+        e.duration = presentation.getLong("durationMS");
+         
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");                
+            e.date = sdf.parse(presentation.getString("startTime"));
+        } catch (ParseException ex) {
+            LOGGER.log(Level.WARNING, "Error parsing date."); 
+        }
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(e.date);            
+        e.title = String.format("%tB %te%s (%tA)", e.date, e.date, getDateSuffix(cal.get(Calendar.DAY_OF_MONTH)), e.date);            
+
+        //Check that there are thumbnails for that lecture, if there isn't then there is no video component to the lecture          
+        JSONArray thumbnails = presentation.getJSONArray("thumbnails");
+
+        //get a low thumbnail url
+        if(thumbnails.length() > 0) { 
+            int k;
+            for (k = 0; k < thumbnails.length(); k++) {
+                if (thumbnails.getString(k).contains("low")) {
+                    break;
+                }
+            }
+            e.thumbnail = thumbnails.getString(k);
+        }
+
+        e.url = getDownloadURL(e, wc);
+        e.venue = getVenue(e);
+        wc.close();
+        LOGGER.log(Level.FINE, "Total parse time for {0} is {1} ms", new Object[] {e.title, System.currentTimeMillis() - t});             
+    }
+    
+    public String getDownloadURL(Echo e, WebClient wc) {
+        long t = System.currentTimeMillis();
+        String download = null;
         //If there is no thumbnail then we can only download the audio version
         if(e.thumbnail != null) {
             //Check if there is a downloadable m4v or use m3u8 playlist
-            int responseCode = 404;
-            String audiovga = e.contentDir + "audio-vga.m4v";
-            try {
-                URL u = new URL(audiovga);
-                HttpURLConnection huc =  (HttpURLConnection) u.openConnection(); 
-                huc.setRequestMethod("HEAD");
-                responseCode = huc.getResponseCode();
+            try {           
+                HtmlPage index = wc.getPage(e.contentDir);
+                HtmlTable table = (HtmlTable) index.getElementsByTagName("table").get(0);
+                for (HtmlTableRow row : table.getRows()) {
+                    List<HtmlTableCell> cells = row.getCells();
+                    if(cells.size() > 1 ) {
+                         DomNodeList<HtmlElement> a = cells.get(1).getElementsByTagName("a");
+                         if(!a.isEmpty() && a.get(0).getAttribute("href").contains(".m4v")) {
+                             download = e.contentDir + a.get(0).getAttribute("href");
+                             break;
+                         }
+                        
+                    }
+                }                
             } catch (IOException ex) {
-                LOGGER.log(Level.WARNING, "Failed accessing {0} for {1}", new Object[] {audiovga, e.title});
+                LOGGER.log(Level.WARNING, "Failed accessing {0} for {1}", new Object[] {e.contentDir, e.title});
             }
 
-            //If the downloadable m4v exists use that, if not we have to use the m3u8 playlist
-            if(responseCode == HttpURLConnection.HTTP_OK) {
-                download = audiovga;
-            } else {
+            //If no downloadable m4v after searching contentDir use the m3u8 playlist stream
+            if(download == null) {
                 download = e.streamDir;
             }
         //We can only download the audio file for the lecture
@@ -209,10 +231,10 @@ public class Fetcher {
         return download;
     }
 
-    public boolean loadPresentationDirs(Echo e) {
+    public Pair<String, String> loadPresentationDirs(Echo e, WebClient wc) {       
         long t = System.currentTimeMillis();        
         try {
-            HtmlPage presentation = bc.webClient.getPage(e.echoBase + "/ess/echo/presentation/" + e.uuid);
+            HtmlPage presentation = wc.getPage(e.echoBase + "/ess/echo/presentation/" + e.uuid);
             LOGGER.log(Level.FINE, "Loading {0} took {1} ms {2}", new Object[] {presentation.getUrl(), presentation.getWebResponse().getLoadTime()}); 
             String requestURL = presentation.getElementsByTagName("iframe").get(0).getAttribute("src");
             List<NameValuePair> params = URLEncodedUtils.parse(new URI(requestURL), "UTF-8");
@@ -234,10 +256,11 @@ public class Fetcher {
                 }
             }
         } catch(IOException | FailingHttpStatusCodeException | URISyntaxException ex) {
+            ex.printStackTrace();
             LOGGER.log(Level.WARNING, "Error loading presentation URLs for UUID {0}.", e.uuid); 
         }
         LOGGER.log(Level.FINE, "Loaded presentation dirs in {0} ms", System.currentTimeMillis() - t); 
-        return (e.contentDir != null && e.streamDir != null);
+        return new Pair<>(e.contentDir, e.streamDir);
     }
 
     public static String getVenue(Echo e) {

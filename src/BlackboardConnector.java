@@ -1,4 +1,5 @@
 
+import com.gargoylesoftware.htmlunit.CookieManager;
 import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
 import com.gargoylesoftware.htmlunit.HttpMethod;
 import com.gargoylesoftware.htmlunit.WebClient;
@@ -33,6 +34,7 @@ public class BlackboardConnector {
     String password;
     HtmlPage BBHome;
     WebClient webClient;
+    CookieManager cookieManager;
     
     
     
@@ -40,7 +42,9 @@ public class BlackboardConnector {
         username = user;
         password = pass;
         BBHome = null;
+        cookieManager = new CookieManager();
         webClient = client;
+        webClient.setCookieManager(cookieManager);
         webClient.getOptions().setJavaScriptEnabled(false);   
         webClient.getOptions().setCssEnabled(false); 
         webClient.getOptions().setAppletEnabled(false);
