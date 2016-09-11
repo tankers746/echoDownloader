@@ -12,6 +12,7 @@ import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import com.gargoylesoftware.htmlunit.html.HtmlTable;
 import com.gargoylesoftware.htmlunit.html.HtmlTableCell;
 import com.gargoylesoftware.htmlunit.html.HtmlTableRow;
+import com.gargoylesoftware.htmlunit.util.Cookie;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -22,7 +23,9 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -57,19 +60,20 @@ public class Fetcher {
 
             LOGGER.log(Level.INFO, "Fetching lectures..."); 
             //Loop over all the units found on LMS
-            for (String unit : c.data.units.keySet()) {
-                //Dont fetch units found in excludeunits
-                if(!c.excludeUnits.contains(unit.toUpperCase())) {
-                    String courseID = c.data.units.get(unit);
-                    List<Echo> fetched = fetchEchoes(courseID);    
-                    if (fetched.isEmpty()) {
-                        LOGGER.log(Level.INFO, "No new {0} lectures to fetch.", unit); 
-                    } else {
-                       LOGGER.log(Level.INFO, "Fetched {0} new {1} lectures.", new Object[] {fetched.size(), unit});                    
-                    }
-                    c.data.courseEchoes.get(courseID).addAll(fetched);
-                }
-            }
+            c.data.units.entrySet()
+                    .parallelStream()
+                    .filter(entry -> !c.excludeUnits.contains(entry.getKey().toUpperCase()))
+                    .forEach(entry -> {
+                        String courseID = entry.getValue();
+                        List<Echo> fetched = fetchEchoes(courseID);    
+                        if (fetched.isEmpty()) {
+                            LOGGER.log(Level.INFO, "No new {0} lectures to fetch.", entry.getKey()); 
+                        } else {
+                           LOGGER.log(Level.INFO, "Fetched {0} new {1} lectures.", new Object[] {fetched.size(), entry.getKey()});                    
+                        }
+                        c.data.courseEchoes.get(courseID).addAll(fetched);                        
+                    });
+            
             LOGGER.log(Level.INFO,"Finished fetching lectures.\n");
             c.data.save();
         } else {
@@ -78,7 +82,16 @@ public class Fetcher {
         bc.webClient.close();
     }    
 
-    public List<Echo> fetchEchoes(String courseID) {
+    public List<Echo> fetchEchoes(String courseID) {    
+        WebClient wc = new WebClient();
+        Iterator<Cookie> i = bc.cookieManager.getCookies().iterator();
+        while (i.hasNext()) {
+            wc.getCookieManager().addCookie(i.next());
+        }
+        wc.getOptions().setJavaScriptEnabled(false);   
+        wc.getOptions().setCssEnabled(false); 
+        wc.getOptions().setAppletEnabled(false);              
+        
         ArrayList<Echo> echoes = c.data.courseEchoes.get(courseID);
         List<Echo> fetchedEchoes = new ArrayList<>();
         //check if there are currently fetched echoes for that section
@@ -87,29 +100,29 @@ public class Fetcher {
             c.data.courseEchoes.put(courseID, echoes);
         }
         //get the JSON data from the API
-        Pair<String, JSONObject> apiData = getAPIData(courseID);
+        Pair<String, JSONObject> apiData = getAPIData(courseID, wc);
         if(apiData.getValue() != null) {
-            fetchedEchoes = parseEchoes(courseID, apiData);            
+            fetchedEchoes = parseEchoes(courseID, apiData, wc.getCookieManager().getCookies());            
         }
         return fetchedEchoes;
     }
     
-    private Pair<String, JSONObject> getAPIData(String courseID) {
-        long t = System.currentTimeMillis();
+    private Pair<String, JSONObject> getAPIData(String courseID, WebClient wc) {
+        long t = System.currentTimeMillis();    
         JSONObject obj = null; 
         String echoBase = null;
         //First we've gotta load the echo system through blackboard so we are authenticated and save the sectionid
-        bc.webClient.getOptions().setJavaScriptEnabled(true);  
+        wc.getOptions().setJavaScriptEnabled(true);          
         try {
-            HtmlPage authenticatedEchoes= bc.webClient.getPage(bc.lms + "/webapps/osc-BasicLTI-BBLEARN/window.jsp?course_id=" + courseID + "&id=lectur");
+            HtmlPage authenticatedEchoes= wc.getPage(bc.lms + "/webapps/osc-BasicLTI-BBLEARN/window.jsp?course_id=" + courseID + "&id=lectur");
             echoBase = "http://" + authenticatedEchoes.getUrl().getAuthority();
             int sectionID = Integer.parseInt(authenticatedEchoes.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0]);
             //then we disable javascript to speed things up
-            bc.webClient.getOptions().setJavaScriptEnabled(false);   
+            wc.getOptions().setJavaScriptEnabled(false);   
             //next we load the echoes again to get the sectionID that is used in the api
-            HtmlPage page = bc.webClient.getPage(echoBase + "/ess/portal/section/" + sectionID);
+            HtmlPage page = wc.getPage(echoBase + "/ess/portal/section/" + sectionID);
             String apiSectionID = page.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0];
-            UnexpectedPage json = bc.webClient.getPage(echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
+            UnexpectedPage json = wc.getPage(echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
             obj = new JSONObject(json.getWebResponse().getContentAsString()); 
         } catch(IOException Ex) {
             LOGGER.log(Level.WARNING, "Failed to get data from the API.");
@@ -118,7 +131,7 @@ public class Fetcher {
         return new Pair<>(echoBase, obj);
     }    
     
-    public List<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData) {
+    public List<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData, Set<Cookie> cookies) {
         List<Echo> parsedEchoes = Collections.synchronizedList(new ArrayList<Echo>());
         //get a list of all of the previously fetched unique echo IDs
         List<String> UUIDs = c.data.courseEchoes.get(courseID).stream().map(Echo::getUUID).collect(Collectors.toList());
@@ -145,15 +158,18 @@ public class Fetcher {
         }
         
         parsedEchoes.parallelStream()
-                .forEach((e) -> populateEcho(e, presentations.getJSONObject(presentations.length() - e.episode)));
+                .forEach((e) -> populateEcho(e, presentations.getJSONObject(presentations.length() - e.episode), cookies));
         return parsedEchoes;
     }
     
-    public void populateEcho(Echo e, JSONObject presentation) {
+    public void populateEcho(Echo e, JSONObject presentation, Set<Cookie> cookies) {
         long t = System.currentTimeMillis();
         LOGGER.log(Level.FINE, "Loading echo data for UUID = {0}.", e.uuid); 
         WebClient wc = new WebClient();
-        wc.setCookieManager(bc.cookieManager);
+       Iterator<Cookie> i = cookies.iterator();
+        while (i.hasNext()) {
+            wc.getCookieManager().addCookie(i.next());
+        }
         wc.getOptions().setJavaScriptEnabled(false);   
         wc.getOptions().setCssEnabled(false); 
         wc.getOptions().setAppletEnabled(false);             
