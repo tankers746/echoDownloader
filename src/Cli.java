@@ -20,7 +20,7 @@ public class Cli {
 
     private static final Logger LOGGER = Logger.getLogger(Cli.class.getName());
     private String[] args = null;
-    private Options options = new Options();
+    private final Options options = new Options();
 
     public Cli(String[] args) {
 
@@ -43,9 +43,6 @@ public class Cli {
     }   
 
     public void parse() {
-        CommandLineParser parser = new GnuParser();
-        CommandLine cmd = null;
-        
         String configPath = null;
         String user = null;
         String pass = null;
@@ -55,8 +52,9 @@ public class Cli {
         boolean verbose = false;
         Boolean setDownloaded = null;
         
+        CommandLineParser parser = new GnuParser();        
         try {
-            cmd = parser.parse(options, args);
+            CommandLine cmd = parser.parse(options, args);
             if (cmd.hasOption("h")) {
                 help();
                 return;
@@ -108,7 +106,7 @@ public class Cli {
         if(download) {
             if(configPath != null) {
                 Downloader downloader = new Downloader(config, verbose);
-                if(downloader.checkDownloadsFolder() && downloader.checkffmpeg()) {
+                if(downloader.checkDownloadsFolder() && downloader.checkFFmpeg()) {
                     downloader.download();                     
                 }    
             } else LOGGER.log(Level.SEVERE, "Please specify a config file to download lectures.\n");        
@@ -144,11 +142,6 @@ public class Cli {
     }
     
     static class ConsoleFormatter extends Formatter {
-
-        //private static final String PATTERN = "MMM dd, yyyy h:mm:ss a";
-        //new SimpleDateFormat(PATTERN).format(new Date(record.getMillis()));
-        
-
         @Override
         public String format(final LogRecord record) {
             StringBuilder sb = new StringBuilder();
@@ -164,9 +157,7 @@ public class Cli {
                     record.getThrown().printStackTrace(pw);
                     pw.close();
                     sb.append(sw.toString());
-                } catch (Exception ex) {
-                    // ignore
-                }
+                } catch (Exception ex) {}
             }
             return sb.toString();
         }

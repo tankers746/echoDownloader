@@ -6,7 +6,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,7 +26,8 @@ public class Downloader {
     
     private static final Logger LOGGER = Logger.getLogger(Downloader.class.getName());
     Config c;
-    boolean verbose;
+    boolean verbose; 
+    enum downloadType { AUDIO, VIDEO, STREAM }
     
     Downloader(Config config, boolean vb) {
         c = config;
@@ -33,27 +36,29 @@ public class Downloader {
 
     public void download() {
         ArrayList<Echo> queue = c.filterEchoes(false);
-        int queueSize = queue.size();
-        for (Echo e : queue) {
-            LOGGER.log(Level.INFO, "{0} lecture(s) in the download queue.", queueSize--);
-            downloadEcho(e);
-        }
+        final AtomicInteger queueSize = new AtomicInteger(queue.size());
+        LOGGER.log(Level.INFO, "{0} lecture(s) in the download queue.", queueSize.get());
+        queue.parallelStream()
+                .forEach((e) -> {
+                    downloadEcho(e);                    
+                    LOGGER.log(Level.INFO, "{0} lecture(s) in the download queue.", queueSize.decrementAndGet());
+                    });
     }
     
-    public void downloadEcho(Echo e) {
-        boolean failed = false;                
-        String ext = ".m4v";
-        boolean audio = false;
-        boolean m3u8 = false;
+    public void downloadEcho(Echo e) {              
+        String ext;
+        downloadType type;
         
-        //Check if the file needs to be constructed from a m3u8 playlist
+        //Find out the type of download
         if(e.url.substring(e.url.length()-4, e.url.length()).equals("m3u8")) {    
             ext = ".mp4";
-            m3u8 = true;
-        }
-        if(e.url.substring(e.url.length()-3, e.url.length()).equals("mp3")) {
+            type = downloadType.STREAM;
+        } else if(e.url.substring(e.url.length()-3, e.url.length()).equals("mp3")) {
             ext = ".mp4";
-            audio = true;
+            type = downloadType.AUDIO;
+        } else {
+            ext = ".m4v";
+            type = downloadType.VIDEO;            
         }        
         
         String basePath = c.downloads + "/" + e.unit + "/";
@@ -63,115 +68,101 @@ public class Downloader {
         while(f.exists()) {
             f = new File(filename + " (" + n++ + ")" + ext);
         }
-             
-        try {
-            List<String> args = new ArrayList<>();
-            args.add(c.ffmpeg);
-            args.add("-i");
-            args.add(e.url);
-            
-            if(audio) {
-                args.add("-f");
-                args.add("lavfi");                      
-                args.add("-i");
-                args.add("color=s=640x480:r=10");  
-                args.add("-c:v");
-                args.add("libx264");  
-                args.add("-c:a");
-                args.add("aac");                
-                args.add("-shortest");                 
-            } else {
-                args.add("-c");
-                args.add("copy");                
-            }
-            
-            args.add("-metadata");
-            args.add("show=" + e.unit + " - " + e.unitName);
-            
-            args.add("-metadata");
-            args.add("title=" + e.title);          
-            
-            args.add("-metadata");
-            args.add("episode_sort=" + e.episode);   
+        List<String> args = buildFFmpegArgs(f, e, type);
+        
+        LOGGER.log(Level.FINE, "Downloading ''{0}''...", f.getName());          
+        e.downloaded = runFFmpeg(args);
+        
+        if(e.downloaded) {
+            c.data.save();    
+            LOGGER.log(Level.INFO, "Succesfully downloaded ''{0}''\n", f.getName());    
+        } else {
+            f.delete();
+            LOGGER.log(Level.INFO, "Failed to download ''{0}''\n", f.getName());      
+        }
+    }
+    
+    List<String> buildFFmpegArgs(File f, Echo e, downloadType type) {
+        List<String> args = new ArrayList<>();
+        args.add(c.ffmpeg);
+        args.add("-i");
+        args.add(e.url);
 
-            //media type is tv show for iTunes
-            args.add("-metadata");
-            args.add("media_type=10");               
-            
-            if(m3u8) {               
-                args.add("-bsf:a");
-                args.add("aac_adtstoasc");   
-            }
-            
-            args.add(f.getPath());
-            
-            new File(basePath).mkdirs();
-            ProcessBuilder downloader = new ProcessBuilder(args).redirectErrorStream(true);
-            LOGGER.log(Level.FINE, "{0}", downloader.command());
-            LOGGER.log(Level.INFO, "Downloading ''{0}''...", f.getName());               
-            Process ffmpeg = downloader.start();
-            
-            int exitCode = -1;
-            try (BufferedReader processOutputReader = new BufferedReader(new InputStreamReader(ffmpeg.getInputStream(), Charset.defaultCharset()));) {
+        if(type == downloadType.AUDIO) {
+            args.add("-f");
+            args.add("lavfi");                      
+            args.add("-i");
+            args.add("color=s=640x480:r=10");  
+            args.add("-c:v");
+            args.add("libx264");  
+            args.add("-c:a");
+            args.add("aac");                
+            args.add("-shortest");                 
+        } else {
+            args.add("-c");
+            args.add("copy");                
+        }
+
+       if(type == downloadType.STREAM) {               
+            args.add("-bsf:a");
+            args.add("aac_adtstoasc");   
+        }                
+
+        args.add("-metadata");
+        args.add("show=" + e.unit + " - " + e.unitName);
+
+        args.add("-metadata");
+        args.add("title=" + e.title + " - " + e.description);          
+
+        args.add("-metadata");
+        args.add("episode_sort=" + e.episode);   
+
+        args.add("-metadata");
+        args.add("description=" + e.description);              
+
+        //media type is tv show for iTunes
+        args.add("-metadata");
+        args.add("media_type=10");       
+        
+        args.add(f.getPath()); 
+        return args;
+    }
+    
+    boolean runFFmpeg(List<String> args) {
+        boolean ok = false;        
+        try {     
+            ProcessBuilder ffmpeg = new ProcessBuilder(args).redirectErrorStream(true);
+            LOGGER.log(Level.FINE, "{0}", ffmpeg.command());          
+            Process p = ffmpeg.start();
+            try (BufferedReader processOutputReader = new BufferedReader(new InputStreamReader(p.getInputStream(), Charset.defaultCharset()));) {
                 String line;
                 while ((line = processOutputReader.readLine()) != null) {
                     if(verbose) System.out.println(line);
                 }
-                exitCode = ffmpeg.waitFor();
+                int exitCode = p.waitFor();
+                ok = (exitCode == 0);
             }
-            
-            if(exitCode == 0) {
-                LOGGER.log(Level.INFO, "Succesfully downloaded to ''{0}''\n", f.getParent());
-                e.downloaded = true;
-                c.data.save();
-            } else failed = true;
-        } catch (IOException | InterruptedException ex) {
-            failed = true;  
-        }
-        
-        if(failed) {
-            f.delete();
-            LOGGER.log(Level.INFO, "Failed to download ''{0}''\n", f.getName());            
-        }
+        } catch (IOException | InterruptedException ex) {}
+        return ok;        
     }
 
-    public boolean checkffmpeg() {
-        boolean ok = false;
-        try {        
-            // start execution
-            Process p = Runtime.getRuntime().exec(c.ffmpeg + " -?");
-            // exhaust input stream
-            BufferedInputStream in = new BufferedInputStream(p.getInputStream());
-            byte[] bytes = new byte[4096];
-            while (in.read(bytes) != -1) {}
-            // wait for completion
-            int exitCode = p.waitFor();
-            if(exitCode == 0) {
-                ok = true;
-            }
-        } catch (IOException | InterruptedException ex) {
-            ok = false;
+    public boolean checkFFmpeg() {       
+        if(runFFmpeg(Arrays.asList(c.ffmpeg, "-?"))) {
+            return true;            
+        } else {
+            LOGGER.log(Level.SEVERE, "Unable to access ffmpeg at the location: ''{0}''", c.ffmpeg);
+            return false;            
         }
-        
-        if(!ok) {
-            LOGGER.log(Level.SEVERE, "Unable to access ffmpeg at the location: ''{0}''", c.ffmpeg);            
-        }
-        return ok;
     }
     
     public boolean checkDownloadsFolder() {
-        boolean ok = false;
-        try {
-            File f = new File(c.downloads);
-            ok = (f.getAbsoluteFile().exists() && f.getAbsoluteFile().isDirectory());
-        } catch (Exception Ex) {
-            ok = false;
-        }
-        
-        if(!ok) {
+        File f = new File(c.downloads);
+        if(f.getAbsoluteFile().exists() && f.getAbsoluteFile().isDirectory()) {
+            return true;
+        } else {
             LOGGER.log(Level.SEVERE, "Path to downloads folder is not valid ''{0}''", c.downloads);  
+            return false;
         }
-        return ok;
     }
     
 }

@@ -180,7 +180,8 @@ public class Fetcher {
         e.streamDir = presentationDirs.getValue();
             
         e.duration = presentation.getLong("durationMS");
-         
+        e.description = presentation.getString("title"); 
+        
         try {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");                
             e.date = sdf.parse(presentation.getString("startTime"));

@@ -104,7 +104,9 @@ public class Config {
     
     private boolean containsVenue(String echoVenue, List<String> filterVenues) {
         for(String searchVenue : filterVenues) {
-            if(echoVenue.toLowerCase().contains(searchVenue.toLowerCase())) return true;
+            if(searchVenue.equals("")) {
+                if(echoVenue.equals(searchVenue)) return true;
+            } else if(echoVenue.toLowerCase().contains(searchVenue.toLowerCase())) return true;
         }
         return false;
     }    

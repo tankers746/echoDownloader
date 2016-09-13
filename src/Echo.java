@@ -21,6 +21,7 @@ public class Echo implements Serializable, Comparable<Echo> {
     String echoBase;
     String contentDir;
     String streamDir;
+    String description;
     int episode;
     Date date;
     long fileSize;
@@ -28,7 +29,7 @@ public class Echo implements Serializable, Comparable<Echo> {
     Boolean downloaded;
     String uuid;
     
-    Echo(String u, String name, String download, String v, String t, Date d, String baseUrl, long size, long dur, Boolean dl, int ep, String uName, String id, String content, String stream) {
+    Echo(String u, String name, String download, String v, String t, Date d, String baseUrl, long size, long dur, Boolean dl, int ep, String uName, String id, String content, String stream, String descr) {
         unit = u;
         title = name;
         url = download;
@@ -44,6 +45,7 @@ public class Echo implements Serializable, Comparable<Echo> {
         uuid = id;
         contentDir = content;
         streamDir = stream;
+        description = descr;
     }
 
     @Override
@@ -56,7 +58,7 @@ public class Echo implements Serializable, Comparable<Echo> {
     }    
     
     Echo() {
-        this(null, null, null, null, null, null, null, 0, 0, false, 0, null, null, null, null);
+        this(null, null, null, null, null, null, null, 0, 0, false, 0, null, null, null, null, null);
     }
     
 }
