@@ -51,11 +51,10 @@ public class BlackboardConnector {
         
     }
     
-    boolean loginLMS() {
+    public boolean loginLMS() {
         boolean loggedIn = false;
         LOGGER.log(Level.INFO, "Logging into LMS...");
         try {
-            //WebClient webClient = new WebClient();
             //Create the POST to login to LMS
             URL url = new URL(SSO);
             WebRequest requestSettings = new WebRequest(url, HttpMethod.POST);     

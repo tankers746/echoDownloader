@@ -96,7 +96,7 @@ public class Config {
                 }
                 bufferedReader.close();
             } catch(IOException Ex) {
-                LOGGER.log(Level.SEVERE,"Failed to read config file check that the path is correct.");
+                LOGGER.log(Level.SEVERE,"Failed to read config file, check that the path is correct.");
             }
         }
 
@@ -119,7 +119,7 @@ public class Config {
         return filteredEchoes;
     }
     
-    public List<Echo> filterEchoList(List<Echo> echoes, Boolean downloaded) {
+    private List<Echo> filterEchoList(List<Echo> echoes, Boolean downloaded) {
         ArrayList<Echo> filteredEchoes = new ArrayList<>();  
         echoes.stream()
                 .filter((e) -> (downloaded == null || downloaded.equals(e.downloaded)))
@@ -143,7 +143,8 @@ public class Config {
             }
             String[] venueList = e.venue.split(",");
             String venue = venueList[venueList.length - 1].split(" \\[")[0].trim();
-            String summary = String.format("%s - %s @ %s%s", e.unit, e.title, venue, downloaded);
+            String[] urlParts = e.url.split("\\.");
+            String summary = String.format("%s - %s @ %s [%s]%s", e.unit, e.title, venue, urlParts[urlParts.length-1], downloaded);
             System.out.println(summary);
         }
     }

@@ -4,8 +4,11 @@
  * and open the template in the editor.
  */
 import com.gargoylesoftware.htmlunit.FailingHttpStatusCodeException;
+import com.gargoylesoftware.htmlunit.HttpMethod;
 import com.gargoylesoftware.htmlunit.UnexpectedPage;
 import com.gargoylesoftware.htmlunit.WebClient;
+import com.gargoylesoftware.htmlunit.WebRequest;
+import com.gargoylesoftware.htmlunit.WebResponse;
 import com.gargoylesoftware.htmlunit.html.DomNodeList;
 import com.gargoylesoftware.htmlunit.html.HtmlElement;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
@@ -33,6 +36,7 @@ import javafx.util.Pair;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+import org.apache.commons.io.IOUtils;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.json.*;
@@ -82,7 +86,7 @@ public class Fetcher {
         bc.webClient.close();
     }    
 
-    public List<Echo> fetchEchoes(String courseID) {    
+    private List<Echo> fetchEchoes(String courseID) {    
         WebClient wc = new WebClient();
         Iterator<Cookie> i = bc.cookieManager.getCookies().iterator();
         while (i.hasNext()) {
@@ -131,7 +135,7 @@ public class Fetcher {
         return new Pair<>(echoBase, obj);
     }    
     
-    public List<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData, Set<Cookie> cookies) {
+    private List<Echo> parseEchoes(String courseID, Pair<String, JSONObject> apiData, Set<Cookie> cookies) {
         List<Echo> parsedEchoes = Collections.synchronizedList(new ArrayList<Echo>());
         //get a list of all of the previously fetched unique echo IDs
         List<String> UUIDs = c.data.courseEchoes.get(courseID).stream().map(Echo::getUUID).collect(Collectors.toList());
@@ -162,11 +166,11 @@ public class Fetcher {
         return parsedEchoes;
     }
     
-    public void populateEcho(Echo e, JSONObject presentation, Set<Cookie> cookies) {
+    private void populateEcho(Echo e, JSONObject presentation, Set<Cookie> cookies) {
         long t = System.currentTimeMillis();
         LOGGER.log(Level.FINE, "Loading echo data for UUID = {0}.", e.uuid); 
         WebClient wc = new WebClient();
-       Iterator<Cookie> i = cookies.iterator();
+        Iterator<Cookie> i = cookies.iterator();
         while (i.hasNext()) {
             wc.getCookieManager().addCookie(i.next());
         }
@@ -212,33 +216,30 @@ public class Fetcher {
         LOGGER.log(Level.FINE, "Total parse time for {0} is {1} ms", new Object[] {e.title, System.currentTimeMillis() - t});             
     }
     
-    public String getDownloadURL(Echo e, WebClient wc) {
+    private String getDownloadURL(Echo e, WebClient wc) {
         long t = System.currentTimeMillis();
         String download = null;
         //If there is no thumbnail then we can only download the audio version
         if(e.thumbnail != null) {
-            //Check if there is a downloadable m4v or use m3u8 playlist
+            //default download is stream
+            download = e.streamDir;
+            //Check if there is a downloadable m4v and see if its better quality than the stream
             try {           
                 HtmlPage index = wc.getPage(e.contentDir);
                 HtmlTable table = (HtmlTable) index.getElementsByTagName("table").get(0);
+                //iterate over the filelist looking for a m4v
                 for (HtmlTableRow row : table.getRows()) {
                     List<HtmlTableCell> cells = row.getCells();
                     if(cells.size() > 1 ) {
                          DomNodeList<HtmlElement> a = cells.get(1).getElementsByTagName("a");
                          if(!a.isEmpty() && a.get(0).getAttribute("href").contains(".m4v")) {
-                             download = e.contentDir + a.get(0).getAttribute("href");
+                             download = getBestQuality(e, e.contentDir + a.get(0).getAttribute("href"), wc);
                              break;
                          }
-                        
                     }
                 }                
             } catch (IOException ex) {
                 LOGGER.log(Level.WARNING, "Failed accessing {0} for {1}", new Object[] {e.contentDir, e.title});
-            }
-
-            //If no downloadable m4v after searching contentDir use the m3u8 playlist stream
-            if(download == null) {
-                download = e.streamDir;
             }
         //We can only download the audio file for the lecture
         } else {
@@ -247,11 +248,43 @@ public class Fetcher {
         LOGGER.log(Level.FINE, "Got download URL for {0} in {1} ms {2}", new Object[] {e.title, System.currentTimeMillis() - t, download}); 
         return download;
     }
+    
+    private String getBestQuality(Echo e, String m4v, WebClient wc) {
+        String highest = e.streamDir;
+        try {
+            String m3u8_file = IOUtils.toString(new URL(e.streamDir));
+            long bandwidth = Long.parseLong(m3u8_file.split("BANDWIDTH=")[1].split("\\D+")[0]);
+            //bandwidth is bits per second, need to convert to total bytes
+            long m3u8_size = (bandwidth/8) * (e.duration/1000);                    
+            long m4v_size = getFileSize(m4v, wc);
+            String chosen = "m3u8";
+            if(m4v_size > m3u8_size) {
+                highest = m4v;
+                chosen = "m4v";
+            }
+            LOGGER.log(Level.FINE, "{0} - {1}: m4v_size: {2}, m3u8_size: {3} ({4} is best quality)", new Object[] {e.unit, e.title, m4v_size, m3u8_size, chosen});
+        } catch (IOException ex) {
+            LOGGER.log(Level.FINE, "Error determining highest filesize, choosing m3u8 by default");  
+        }
+        return highest;
+    }
+    
+    private Long getFileSize(String m4v, WebClient wc) {
+        long fileSize = 0;
+        try {
+            WebRequest requestSettings = new WebRequest(new URL(m4v), HttpMethod.HEAD);
+            WebResponse response = wc.getPage(requestSettings).getWebResponse();
+            fileSize = Long.parseLong(response.getResponseHeaderValue("Content-Length"));
+        } catch (Exception ex) {
+            LOGGER.log(Level.FINE, "Failed getting filesize for {0}", m4v); 
+        }
+        return fileSize;
+    }    
 
-    public Pair<String, String> loadPresentationDirs(Echo e, WebClient wc) {       
+    private Pair<String, String> loadPresentationDirs(Echo e, WebClient wc) {       
         long t = System.currentTimeMillis();        
         try {
-            HtmlPage presentation = wc.getPage(e.echoBase + "/ess/echo/presentation/" + e.uuid);
+            HtmlPage presentation = wc.getPage(e.echoBase + "/ess/echo/presentation/" + e.uuid); 
             LOGGER.log(Level.FINE, "Loading {0} took {1} ms {2}", new Object[] {presentation.getUrl(), presentation.getWebResponse().getLoadTime()}); 
             String requestURL = presentation.getElementsByTagName("iframe").get(0).getAttribute("src");
             List<NameValuePair> params = URLEncodedUtils.parse(new URI(requestURL), "UTF-8");
@@ -280,7 +313,7 @@ public class Fetcher {
         return new Pair<>(e.contentDir, e.streamDir);
     }
 
-    public static String getVenue(Echo e) {
+    private static String getVenue(Echo e) {
         long t = System.currentTimeMillis();    
         String venue = null;
         XMLInputFactory inputFactory = XMLInputFactory.newInstance();
@@ -335,35 +368,5 @@ public class Fetcher {
             }
         }
     }
-
-    public void loadFileSizes(ArrayList<Echo> echoes, int startIndex, int finishIndex) {
-        WebClient webClient = new WebClient();
-        //very important: getting the filesize does not work with out setting the AJAX controller   
-        webClient.setAjaxController(new NicelyResynchronizingAjaxController());
-        //load the server so we can grab the filesizes
-        HtmlPage media = null;
-        try {
-            String echoContent = echoes.get(0).url.split("echocontent")[0] + "echocontent";
-            media = webClient.getPage(echoContent);
-        } catch (Exception ex) {
-            Logger.getLogger(echoDownloader.class.getName()).log(Level.SEVERE, null, ex);
-            return;
-        }
-        //iterate over all the newly fetched echoes        
-        for (int k = startIndex; k < finishIndex; k++) {
-            Echo e = echoes.get(k);
-
-            //politely ask the server for the filesize
-            e.fileSize = Long.parseLong(media.executeJavaScript(
-                    "var size = 0;"
-                    + "var url = '" + e.url + "';"
-                    + "var xhr = new XMLHttpRequest();"
-                    + "xhr.open('HEAD', url, true);"
-                    + "xhr.onreadystatechange = function() {"
-                    + "    size = xhr.getResponseHeader('Content-Length');"
-                    + "};"
-                    + "xhr.send();size;").getJavaScriptResult().toString());
-        }
-        webClient.close();
-    }*/
+*/
 }

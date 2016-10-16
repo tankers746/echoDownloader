@@ -1,5 +1,4 @@
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -42,10 +41,10 @@ public class Downloader {
                 .forEach((e) -> {
                     downloadEcho(e);                    
                     LOGGER.log(Level.INFO, "{0} lecture(s) in the download queue.", queueSize.decrementAndGet());
-                    });
+                });
     }
     
-    public void downloadEcho(Echo e) {              
+    private void downloadEcho(Echo e) {              
         String ext;
         downloadType type;
         
@@ -82,7 +81,7 @@ public class Downloader {
         }
     }
     
-    List<String> buildFFmpegArgs(File f, Echo e, downloadType type) {
+    private List<String> buildFFmpegArgs(File f, Echo e, downloadType type) {
         List<String> args = new ArrayList<>();
         args.add(c.ffmpeg);
         args.add("-i");
@@ -128,7 +127,7 @@ public class Downloader {
         return args;
     }
     
-    boolean runFFmpeg(List<String> args) {
+    private boolean runFFmpeg(List<String> args) {
         boolean ok = false;        
         try {     
             ProcessBuilder ffmpeg = new ProcessBuilder(args).redirectErrorStream(true);
