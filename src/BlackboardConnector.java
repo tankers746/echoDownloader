@@ -10,6 +10,7 @@ import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import java.io.IOException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -94,8 +95,8 @@ public class BlackboardConnector {
         return loggedIn;
     }
     
-    public int loadUnits(Data d) {
-        int loaded = 0;
+    public HashMap<String, String> loadUnits(Data d) {
+        HashMap<String, String> loadedUnits = new HashMap<>();  
         try {
             LOGGER.log(Level.INFO, "Loading units...");              
             long t = System.currentTimeMillis();
@@ -114,19 +115,19 @@ public class BlackboardConnector {
                     if(id.contains("course")) {
                         //separate the courseID from the rest of the id, e.g. (id = "amc.showcourseid._12892_1")
                         String title = input.getAttribute("title").substring(0,8);
-                        d.units.put(title , id.split("\\.")[2]);
-                        LOGGER.log(Level.INFO, "Found unit {0} with course ID {1}", new Object[] {title, d.units.get(title)});                           
-                        loaded++;
+                        loadedUnits.put(title , id.split("\\.")[2]);
+                        LOGGER.log(Level.FINE, "Found unit {0} with course ID {1}", new Object[] {title, d.units.get(title)});                           
                         break;
                     }
                 }
-            }           
+            }
+            d.units.putAll(loadedUnits);
             d.save();
-            LOGGER.log(Level.INFO, "Loaded {0} units from LMS.\n", loaded);
+            LOGGER.log(Level.INFO, "Loaded {0} units from LMS.\n", loadedUnits.size());
         } catch (IOException | FailingHttpStatusCodeException ex) {
             LOGGER.log(Level.SEVERE, "Failed to get units from Blackboard.\n");
         }
-        return loaded;
+        return loadedUnits;
     }
     
 }

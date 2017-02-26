@@ -26,6 +26,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -57,14 +58,11 @@ public class Fetcher {
     
     public void fetch() {
         if(bc.loginLMS()) {        
-            if (c.data.units.isEmpty()) { //checks if there is a saved table
-                LOGGER.log(Level.WARNING, "Units haven't been loaded yet\n"); 
-                bc.loadUnits(c.data);
-            }
+            HashMap<String, String> loadedUnits = bc.loadUnits(c.data);
 
             LOGGER.log(Level.INFO, "Fetching lectures..."); 
             //Loop over all the units found on LMS
-            c.data.units.entrySet()
+            loadedUnits.entrySet()
                     .parallelStream()
                     .filter(entry -> !c.excludeUnits.contains(entry.getKey().toUpperCase()))
                     .forEach(entry -> {
@@ -112,6 +110,7 @@ public class Fetcher {
     }
     
     private Pair<String, JSONObject> getAPIData(String courseID, WebClient wc) {
+        LOGGER.log(Level.FINE, "Getting API data for course ID {0}", courseID);   
         long t = System.currentTimeMillis();    
         JSONObject obj = null; 
         String echoBase = null;
@@ -119,17 +118,17 @@ public class Fetcher {
         wc.getOptions().setJavaScriptEnabled(true);          
         try {
             HtmlPage authenticatedEchoes= wc.getPage(bc.lms + "/webapps/osc-BasicLTI-BBLEARN/window.jsp?course_id=" + courseID + "&id=lectur");
-            echoBase = "http://" + authenticatedEchoes.getUrl().getAuthority();
-            int sectionID = Integer.parseInt(authenticatedEchoes.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0]);
+            echoBase = "https://" + authenticatedEchoes.getUrl().getAuthority();
+            String sectionName = authenticatedEchoes.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0];
             //then we disable javascript to speed things up
             wc.getOptions().setJavaScriptEnabled(false);   
             //next we load the echoes again to get the sectionID that is used in the api
-            HtmlPage page = wc.getPage(echoBase + "/ess/portal/section/" + sectionID);
+            HtmlPage page = wc.getPage(echoBase + "/ess/portal/section/" + sectionName);
             String apiSectionID = page.getElementsByTagName("iframe").get(0).getAttribute("src").split("/section/")[1].split("\\?api")[0];
             UnexpectedPage json = wc.getPage(echoBase + "/ess/client/api/sections/" + apiSectionID + "/section-data.json?&pageSize=999");
             obj = new JSONObject(json.getWebResponse().getContentAsString()); 
-        } catch(IOException Ex) {
-            LOGGER.log(Level.WARNING, "Failed to get data from the API.");
+        } catch(Exception Ex) {
+            LOGGER.log(Level.WARNING, "Failed to get data from the API.", Ex);
         } 
         LOGGER.log(Level.FINE, "Getting JSON data for {0} took {1} ms", new Object[] {courseID, System.currentTimeMillis() - t});   
         return new Pair<>(echoBase, obj);
@@ -190,7 +189,7 @@ public class Fetcher {
             SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX");                
             e.date = sdf.parse(presentation.getString("startTime"));
         } catch (ParseException ex) {
-            LOGGER.log(Level.WARNING, "Error parsing date."); 
+            LOGGER.log(Level.WARNING, "Error parsing date.", ex); 
         }
         Calendar cal = Calendar.getInstance();
         cal.setTime(e.date);            
@@ -305,9 +304,8 @@ public class Fetcher {
                         break;
                 }
             }
-        } catch(IOException | FailingHttpStatusCodeException | URISyntaxException ex) {
-            ex.printStackTrace();
-            LOGGER.log(Level.WARNING, "Error loading presentation URLs for UUID {0}.", e.uuid); 
+        } catch(Exception ex) {
+            LOGGER.log(Level.WARNING, "Error loading presentation URLs.", ex); 
         }
         LOGGER.log(Level.FINE, "Loaded presentation dirs in {0} ms", System.currentTimeMillis() - t); 
         return new Pair<>(e.contentDir, e.streamDir);
