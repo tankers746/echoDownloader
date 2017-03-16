@@ -141,8 +141,11 @@ public class Config {
             if (e.downloaded) {
                 downloaded = " [Downloaded]";
             }
-            String[] venueList = e.venue.split(",");
-            String venue = venueList[venueList.length - 1].split(" \\[")[0].trim();
+            String venue = "N/A";
+            if(e.venue != null) {
+                String[] venueList = e.venue.split(",");
+                venue = venueList[venueList.length - 1].split(" \\[")[0].trim();
+            }
             String[] urlParts = e.url.split("\\.");
             String summary = String.format("%s - %s @ %s [%s]%s", e.unit, e.title, venue, urlParts[urlParts.length-1], downloaded);
             System.out.println(summary);

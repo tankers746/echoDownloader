@@ -63,6 +63,7 @@ public class Downloader {
         String basePath = c.downloads + "/" + e.unit + "/";
         String filename =  String.format("%s%s - S01E%02d - %s", basePath, e.unit, e.episode, e.title);
         File f = new File(filename + ext);
+        f.getParentFile().mkdirs();
         int n = 1;
         while(f.exists()) {
             f = new File(filename + " (" + n++ + ")" + ext);
@@ -136,12 +137,16 @@ public class Downloader {
             try (BufferedReader processOutputReader = new BufferedReader(new InputStreamReader(p.getInputStream(), Charset.defaultCharset()));) {
                 String line;
                 while ((line = processOutputReader.readLine()) != null) {
+                    LOGGER.log(Level.FINE, "{0}", line);  
                     if(verbose) System.out.println(line);
                 }
                 int exitCode = p.waitFor();
                 ok = (exitCode == 0);
             }
-        } catch (IOException | InterruptedException ex) {}
+        } catch (IOException | InterruptedException ex) {
+            LOGGER.log(Level.WARNING, "FFmpeg failed.");  
+            LOGGER.log(Level.FINE, "", ex);   
+        }
         return ok;        
     }
 

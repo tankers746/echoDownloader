@@ -223,7 +223,8 @@ public class Fetcher {
             //default download is stream
             download = e.streamDir;
             //Check if there is a downloadable m4v and see if its better quality than the stream
-            try {           
+            try {   
+                wc.getOptions().setUseInsecureSSL(true);
                 HtmlPage index = wc.getPage(e.contentDir);
                 HtmlTable table = (HtmlTable) index.getElementsByTagName("table").get(0);
                 //iterate over the filelist looking for a m4v
@@ -239,6 +240,7 @@ public class Fetcher {
                 }                
             } catch (IOException ex) {
                 LOGGER.log(Level.WARNING, "Failed accessing {0} for {1}", new Object[] {e.contentDir, e.title});
+                LOGGER.log(Level.FINE, "", ex);
             }
         //We can only download the audio file for the lecture
         } else {
@@ -317,7 +319,7 @@ public class Fetcher {
         XMLInputFactory inputFactory = XMLInputFactory.newInstance();
         //get echo details from the presentation.xml
         try {
-            InputStream in = new URL(e.contentDir + "presentation.xml").openStream();
+            InputStream in = new URL(e.contentDir.replace("https","http") + "presentation.xml").openStream();
             XMLStreamReader streamReader = inputFactory.createXMLStreamReader(in);
             streamReader.nextTag(); // Advance to session-info
             streamReader.nextTag(); // Advance to presentation-properties             
@@ -331,6 +333,7 @@ public class Fetcher {
             in.close();
         } catch (IOException | XMLStreamException ex) {
             LOGGER.log(Level.WARNING, "Error loading venue for {0}.", e.title); 
+            LOGGER.log(Level.FINE, "", ex); 
         }
         LOGGER.log(Level.FINE, "Loaded venue for {0} in {1} ms", new Object[] {e.title, System.currentTimeMillis() - t}); 
         return venue;
